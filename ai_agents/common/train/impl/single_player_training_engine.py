@@ -1,6 +1,7 @@
 from ai_agents.common.train.interface.agent_manager import AgentManager
 from typing import List
 from ai_agents.common.train.interface.training_engine import TrainingEngine
+from tqdm import tqdm
 
 class SinglePlayerTrainingEngine(TrainingEngine):
     def __init__(
@@ -16,25 +17,27 @@ class SinglePlayerTrainingEngine(TrainingEngine):
         self.environment_generator = environment_generator
 
     def train(self, total_epochs: int, epoch_timesteps: int, cycle_timesteps: int):
-        for epoch in range(total_epochs):
-            print(f"Starting epoch {epoch + 1}/{total_epochs}")
-            protagonist_agents = self.agent_manager.get_training_agents()
-            self.agent_manager.initialize_frozen_best_models()
-            antagonist_agents = self.agent_manager.get_frozen_best_models()
+        with tqdm(total=total_epochs, desc="Overall Training", unit="epoch") as pbar_epoch:
+            for epoch in range(total_epochs):
+                pbar_epoch.set_description(f"Epoch {epoch + 1}/{total_epochs}")
+                protagonist_agents = self.agent_manager.get_training_agents()
+                self.agent_manager.initialize_frozen_best_models()
+                antagonist_agents = self.agent_manager.get_frozen_best_models()
 
-            protagonist_agent = protagonist_agents[0]
-            env = self.environment_generator()
-            protagonist_agent.change_env(env)
-            protagonist_agent.learn(epoch_timesteps)
+                protagonist_agent = protagonist_agents[0]
+                env = self.environment_generator()
+                protagonist_agent.change_env(env)
+                protagonist_agent.learn(epoch_timesteps)
 
-            self.current_epoch += 1
+                self.current_epoch += 1
+                pbar_epoch.update(1)
 
 
     def test(self, num_episodes: int = 100):
         protagonist = self.agent_manager.get_frozen_best_models()[0]
         env = self.environment_generator(protagonist)
 
-        for episode in range(num_episodes):
+        for episode in tqdm(range(num_episodes), desc="Testing", unit="episode"):
             obs, _ = env.reset()
             done = False
             while not done:
@@ -42,4 +45,3 @@ class SinglePlayerTrainingEngine(TrainingEngine):
                 obs, reward, terminated, truncated, info = env.step(action)
                 env.render()
                 done = terminated or truncated
-            print(f"Episode {episode + 1}/{num_episodes} completed.")
