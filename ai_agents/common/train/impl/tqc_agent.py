@@ -71,7 +71,7 @@ class TQCFoosballAgent(FoosballAgent):
 
     def load(self) -> None:
         base = self._best_model_basepath()
-        self.model = TQC.load(str(base), device="mps")
+        self.model = TQC.load(str(base), device="cuda")
         print(f"Agent {self.id} loaded model from {base}.zip")
 
     # ---------- Init / Learn / Predict ----------
@@ -85,7 +85,7 @@ class TQCFoosballAgent(FoosballAgent):
                 self.env,
                 # keep SAC-aligned core knobs:
                 buffer_size=1_000_000,
-                device="mps",
+                device="cuda",
                 policy_kwargs=self.policy_kwargs,
                 verbose=1,
                 tensorboard_log=self.log_dir,
@@ -120,7 +120,7 @@ class TQCFoosballAgent(FoosballAgent):
                 "MlpPolicy",
                 self.env,
                 buffer_size=1_000_000,
-                device="mps",
+                device="cuda",
                 policy_kwargs=self.policy_kwargs,
                 verbose=1,
                 tensorboard_log=self.log_dir,
