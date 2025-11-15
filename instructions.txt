@@ -1,0 +1,343 @@
+================================================================================
+FOOSBALL AI TRAINING PROJECT - SETUP AND RUNNING INSTRUCTIONS
+================================================================================
+
+PROJECT OVERVIEW
+================================================================================
+This project trains an AI agent to play foosball using reinforcement learning.
+It uses MuJoCo physics simulation and implements two RL algorithms:
+- SAC (Soft Actor-Critic) - Available in v1 and v2
+- TQC (Truncated Quantile Critics) - Available in v2
+
+The project has three main components:
+1. AI Agents (ai_agents/) - Training engines and agent implementations
+2. Simulation (foosball_sim/) - MuJoCo physics simulation environments
+3. Servo Control (servo_control/) - Hardware control code (not needed for training)
+
+================================================================================
+STEP-BY-STEP SETUP INSTRUCTIONS
+================================================================================
+
+STEP 1: INSTALL DEPENDENCIES
+--------------------------------------------------------------------------------
+1. Ensure you have Python 3.8+ installed
+2. Navigate to the project directory:
+   cd "C:\Pru Projects\foosballpart2"
+
+3. Install all required packages:
+   pip install -r requirements.txt
+
+   Note: This will install PyTorch, MuJoCo, Stable-Baselines3, and other dependencies.
+   Installation may take several minutes.
+
+STEP 2: SETUP MUJOCO SIMULATION PATH (if needed)
+--------------------------------------------------------------------------------
+The simulation XML files are located at:
+- v1: foosball_sim/v1/foosball_sim.xml
+- v2: foosball_sim/v2/foosball_sim.xml
+
+If you need to change the default path, set the SIM_PATH environment variable:
+   Windows PowerShell:
+   $env:SIM_PATH="C:\Pru Projects\foosballpart2\foosball_sim\v2\foosball_sim.xml"
+
+   Windows CMD:
+   set SIM_PATH=C:\Pru Projects\foosballpart2\foosball_sim\v2\foosball_sim.xml
+
+STEP 3: CHOOSE YOUR TRAINING SCRIPT
+--------------------------------------------------------------------------------
+You have three entry points to choose from:
+
+A. SAC Agent v2 (Recommended - Single Player Training)
+   File: sac_agent_entry_v2.py
+   Uses: ai_agents/v2/gym/full_information_protagonist_antagonist_gym.py
+   Training mode: Single player (no opponent)
+
+B. SAC Agent v1 (Protagonist-Antagonist Training)
+   File: sac_agent_entry.py
+   Uses: ai_agents/v1/gym/image_based_pa_gym.py
+   Training mode: Trains against previous best models
+
+C. TQC Agent (Alternative Algorithm)
+   File: tqc_agent_entry.py
+   Uses: ai_agents/v2/gym/full_information_protagonist_antagonist_gym.py
+   Training mode: Single player (no opponent)
+
+STEP 4: RUN TRAINING
+--------------------------------------------------------------------------------
+To train a new model:
+   python sac_agent_entry_v2.py
+
+To test an existing trained model:
+   python sac_agent_entry_v2.py --test
+
+Or for TQC:
+   python tqc_agent_entry.py
+   python tqc_agent_entry.py --test
+
+STEP 5: MONITOR TRAINING
+--------------------------------------------------------------------------------
+Training logs and TensorBoard data are saved to:
+   ./logs/
+
+To view training progress with TensorBoard:
+   tensorboard --logdir=./logs
+
+Then open your browser to: http://localhost:6006
+
+Trained models are saved to:
+   ./models/{agent_id}/sac/best_model/  (for SAC)
+   ./models/{agent_id}/tqc/best_model/  (for TQC)
+
+================================================================================
+ML CONFIGURATION LOCATIONS - WHERE TO ADJUST PERFORMANCE SETTINGS
+================================================================================
+
+1. DEVICE CONFIGURATION (GPU/CPU/MPS)
+--------------------------------------------------------------------------------
+Location: ai_agents/common/train/impl/sac_agent.py
+Lines: 54, 65, 89
+Current setting: device='mps' (for Mac Metal Performance Shaders)
+To change:
+   - For NVIDIA GPU: Change 'mps' to 'cuda'
+   - For CPU only: Change 'mps' to 'cpu'
+   - For AMD GPU: Change 'mps' to 'cuda' (if ROCm is installed)
+
+Location: ai_agents/common/train/impl/tqc_agent.py
+Lines: 74, 88, 123
+Current setting: device='cuda' (for NVIDIA GPU)
+To change:
+   - For CPU: Change 'cuda' to 'cpu'
+   - For Mac: Change 'cuda' to 'mps'
+   - For AMD GPU: Keep 'cuda' if ROCm is installed, or use 'cpu'
+
+2. NEURAL NETWORK ARCHITECTURE (Model Size)
+--------------------------------------------------------------------------------
+Location: ai_agents/common/train/impl/sac_agent.py
+Line: 37 (in __init__ method)
+Current setting: policy_kwargs = dict(net_arch=[3000, 3000, 3000, 3000, 3000, 3000, 3000])
+This creates 7 hidden layers with 3000 neurons each.
+
+To make it faster (smaller model):
+   - Reduce number of layers: [512, 512, 512]
+   - Reduce neurons per layer: [1000, 1000, 1000]
+   - Example: dict(net_arch=[256, 256, 256])
+
+To make it more powerful (larger model):
+   - Increase layers or neurons: [4000, 4000, 4000, 4000, 4000, 4000, 4000, 4000]
+
+Location: ai_agents/common/train/impl/tqc_agent.py
+Line: 46 (in __init__ method)
+Current setting: policy_kwargs: Dict = dict(net_arch=[3000, 3000, 3000, 3000, 3000, 3000, 3000])
+Same as SAC - adjust the same way.
+
+3. REPLAY BUFFER SIZE (Memory Usage)
+--------------------------------------------------------------------------------
+Location: ai_agents/common/train/impl/sac_agent.py
+Lines: 54, 65
+Current setting: buffer_size=1000000 (1 million transitions)
+To reduce memory usage:
+   - Change to: buffer_size=500000 (500k transitions)
+   - Or: buffer_size=250000 (250k transitions)
+
+Location: ai_agents/common/train/impl/tqc_agent.py
+Lines: 87, 122
+Current setting: buffer_size=1_000_000 (1 million transitions)
+Same adjustment as SAC.
+
+4. TRAINING EPOCHS AND TIMESTEPS (Training Duration)
+--------------------------------------------------------------------------------
+Location: sac_agent_entry_v2.py
+Lines: 31-32
+Current settings:
+   total_epochs = 15
+   epoch_timesteps = int(100000)  # 100k steps per epoch
+Total training: 15 * 100,000 = 1,500,000 timesteps
+
+To train faster (less training):
+   - Reduce total_epochs: total_epochs = 5
+   - Reduce epoch_timesteps: epoch_timesteps = int(50000)
+
+To train longer (better results):
+   - Increase total_epochs: total_epochs = 30
+   - Increase epoch_timesteps: epoch_timesteps = int(200000)
+
+Location: sac_agent_entry.py
+Lines: 25-26
+Current settings:
+   total_epochs = 10
+   epoch_timesteps = int(1e6)  # 1 million steps per epoch
+Total training: 10 * 1,000,000 = 10,000,000 timesteps
+
+Location: tqc_agent_entry.py
+Lines: 34-35
+Current settings:
+   total_epochs = 15
+   epoch_timesteps = int(100000)  # 100k steps per epoch
+Same as sac_agent_entry_v2.py
+
+5. EVALUATION FREQUENCY (How Often to Save Best Model)
+--------------------------------------------------------------------------------
+Location: ai_agents/common/train/impl/sac_agent.py
+Line: 75
+Current setting: eval_freq=3000 (evaluate every 3000 steps)
+To evaluate more frequently (more frequent saves):
+   - Change to: eval_freq=1000
+To evaluate less frequently (faster training):
+   - Change to: eval_freq=10000
+
+Location: ai_agents/common/train/impl/tqc_agent.py
+Line: 107
+Current setting: eval_freq=3000
+Same adjustment as SAC.
+
+6. NUMBER OF EVALUATION EPISODES
+--------------------------------------------------------------------------------
+Location: ai_agents/common/train/impl/sac_agent.py
+Line: 76
+Current setting: n_eval_episodes=10
+To evaluate faster:
+   - Change to: n_eval_episodes=5
+To evaluate more thoroughly:
+   - Change to: n_eval_episodes=20
+
+Location: ai_agents/common/train/impl/tqc_agent.py
+Line: 108
+Current setting: n_eval_episodes=10
+Same adjustment as SAC.
+
+7. SIMULATION PARAMETERS (MuJoCo Physics)
+--------------------------------------------------------------------------------
+Location: ai_agents/v2/gym/full_information_protagonist_antagonist_gym.py
+Lines to check:
+   - Line 15: MAX_STEPS = 40 (maximum simulation steps per episode)
+   - Line 14: BALL_STOPPED_COUNT_THRESHOLD = 10
+   - Line 79: max_no_progress_steps = 15
+
+To make episodes shorter (faster training):
+   - Reduce MAX_STEPS: MAX_STEPS = 20
+   - Reduce BALL_STOPPED_COUNT_THRESHOLD: BALL_STOPPED_COUNT_THRESHOLD = 5
+
+Location: ai_agents/v1/gym/image_based_pa_gym.py
+Lines to check:
+   - Line 13: BALL_STOPPED_COUNT_THRESHOLD = 80
+   - Line 87: max_no_progress_steps = 80
+   - Lines 43-44: image_width=260, image_height=180 (for image-based observations)
+
+8. RENDERING AND DISPLAY
+--------------------------------------------------------------------------------
+Location: ai_agents/common/train/impl/sac_agent.py
+Line: 77
+Current setting: render=False (no visual rendering during training)
+To enable rendering (slower but visual):
+   - Change to: render=True
+
+Location: tqc_agent_entry.py
+Lines: 25-26
+Environment variables for Mac:
+   os.environ.setdefault("MUJOCO_GL", "glfw")
+   os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+
+For Windows/Linux, you may need to set:
+   os.environ.setdefault("MUJOCO_GL", "egl")  # or "osmesa" for headless
+
+9. PROGRESS BAR DISPLAY
+--------------------------------------------------------------------------------
+Location: ai_agents/common/train/impl/sac_agent.py
+Line: 80
+Current setting: Uses environment variable DISPLAY_PROGRESS
+To disable progress bars (slightly faster):
+   - Set environment variable: DISPLAY_PROGRESS=0
+   Or modify line 80 to: show_progress=False
+
+================================================================================
+PERFORMANCE OPTIMIZATION RECOMMENDATIONS
+================================================================================
+
+TO MAKE TRAINING FASTER:
+1. Reduce network size: Change net_arch to [512, 512, 512] or smaller
+2. Reduce buffer size: Change buffer_size to 250000
+3. Reduce training timesteps: Lower epoch_timesteps and total_epochs
+4. Use GPU: Ensure device='cuda' if you have NVIDIA GPU
+5. Disable rendering: Keep render=False
+6. Reduce evaluation frequency: Increase eval_freq to 10000
+7. Shorter episodes: Reduce MAX_STEPS in gym file
+
+TO MAKE TRAINING MORE ACCURATE (but slower):
+1. Increase network size: Larger net_arch
+2. Increase buffer size: Larger buffer_size
+3. More training: Increase total_epochs and epoch_timesteps
+4. More evaluation episodes: Increase n_eval_episodes
+
+TO REDUCE MEMORY USAGE:
+1. Reduce buffer_size (most important)
+2. Reduce network size (net_arch)
+3. Use CPU instead of GPU (if GPU memory is limited)
+
+TO REDUCE CPU USAGE:
+1. Reduce network size
+2. Reduce buffer size
+3. Disable progress bars
+4. Reduce evaluation frequency
+
+================================================================================
+FILE STRUCTURE SUMMARY
+================================================================================
+
+Entry Points (Run these):
+- sac_agent_entry_v2.py          - SAC v2 training script
+- sac_agent_entry.py             - SAC v1 training script  
+- tqc_agent_entry.py             - TQC training script
+
+Agent Implementations:
+- ai_agents/common/train/impl/sac_agent.py      - SAC agent class
+- ai_agents/common/train/impl/tqc_agent.py      - TQC agent class
+- ai_agents/common/train/impl/single_player_training_engine.py
+- ai_agents/common/train/impl/protagonist_antagonist_training_engine.py
+
+Environments:
+- ai_agents/v2/gym/full_information_protagonist_antagonist_gym.py  - v2 env
+- ai_agents/v1/gym/image_based_pa_gym.py                          - v1 env
+
+Simulation Files:
+- foosball_sim/v1/foosball_sim.xml  - v1 MuJoCo model
+- foosball_sim/v2/foosball_sim.xml  - v2 MuJoCo model
+
+Output Directories (Created during training):
+- ./models/  - Saved trained models
+- ./logs/    - Training logs and TensorBoard data
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+Issue: "CUDA out of memory"
+Solution: 
+   - Reduce buffer_size in sac_agent.py or tqc_agent.py
+   - Reduce net_arch size
+   - Use device='cpu' instead
+
+Issue: "MPS backend not available"
+Solution:
+   - Change device from 'mps' to 'cpu' or 'cuda' in sac_agent.py
+
+Issue: "SIM_PATH not found"
+Solution:
+   - Set SIM_PATH environment variable to correct path
+   - Or modify the default path in the gym files (line 16 in v2, line 14 in v1)
+
+Issue: Training is very slow
+Solution:
+   - Check if using GPU (device='cuda' for NVIDIA)
+   - Reduce network size
+   - Reduce buffer size
+   - Reduce training timesteps
+
+Issue: "Module not found" errors
+Solution:
+   - Run: pip install -r requirements.txt
+   - Ensure you're in the correct directory
+
+================================================================================
+END OF INSTRUCTIONS
+================================================================================
+

@@ -7,6 +7,7 @@ import sys
 import argparse
 
 from ai_agents.v1.gym.image_based_pa_gym import FoosballEnv
+from ai_agents.common.train.impl.performance_utils import setup_performance_optimizations
 
 def sac_foosball_env_factory(antagonist_agent=None):
     env = FoosballEnv(antagonist_model=antagonist_agent)
@@ -15,6 +16,9 @@ def sac_foosball_env_factory(antagonist_agent=None):
     return env
 
 if __name__ == '__main__':
+    # Performance optimizations for RTX 5090 and Ryzen 9 9950X3D
+    device = setup_performance_optimizations(num_threads=32, num_interop_threads=8)
+    
     argparse = argparse.ArgumentParser(description='Train or test model.')
     argparse.add_argument('-t', '--test', help='Test mode', action='store_true')
     args = argparse.parse_args()

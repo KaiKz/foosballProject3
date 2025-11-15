@@ -9,6 +9,7 @@ from stable_baselines3.common.callbacks import EvalCallback, BaseCallback, Callb
 from tqdm import tqdm
 
 from ai_agents.common.train.interface.foosball_agent import FoosballAgent
+from ai_agents.common.train.impl.performance_utils import get_device, compile_model_if_supported
 
 
 class TqdmCallback(BaseCallback):
@@ -71,7 +72,14 @@ class TQCFoosballAgent(FoosballAgent):
 
     def load(self) -> None:
         base = self._best_model_basepath()
-        self.model = TQC.load(str(base), device="cuda")
+        device = get_device()
+        self.model = TQC.load(str(base), device=str(device))
+        # Compile model for improved performance if supported
+        if self.model.policy is not None:
+            try:
+                self.model.policy = compile_model_if_supported(self.model.policy)
+            except Exception:
+                pass  # Skip compilation if it fails, use uncompiled model
         print(f"Agent {self.id} loaded model from {base}.zip")
 
     # ---------- Init / Learn / Predict ----------
@@ -80,16 +88,27 @@ class TQCFoosballAgent(FoosballAgent):
             self.load()
         except Exception:
             print(f"Agent {self.id} could not load model. Initializing new TQC model.")
+            device = get_device()
             self.model = TQC(
                 "MlpPolicy",
                 self.env,
                 # keep SAC-aligned core knobs:
                 buffer_size=1_000_000,
-                device="cuda",
+                device=str(device),
                 policy_kwargs=self.policy_kwargs,
                 verbose=0,
                 tensorboard_log=self.log_dir,
             )
+            # Compile model for improved performance if supported
+            if self.model.policy is not None:
+                try:
+                    self.model.policy = compile_model_if_supported(self.model.policy)
+                except Exception:
+                    pass  # Skip compilation if it fails, use uncompiled model
+            # NOTE: Stable-Baselines3 stores replay buffer on same device as model (CUDA).
+            # There is no built-in parameter to store buffer on CPU while model is on GPU.
+            # The main memory leak fix (preventing agent accumulation) should resolve GPU memory issues.
+            # If memory is still tight, consider reducing buffer_size (e.g., 500_000 or 250_000).
         print("SAC/TQC device:", self.model.device if self.model else "N/A")  # sanity
         print(f"Agent {self.id} initialized (TQC).")
 
@@ -116,15 +135,26 @@ class TQCFoosballAgent(FoosballAgent):
     def learn(self, total_timesteps: int) -> None:
         if self.model is None:
             # if someone calls learn() without initialize_agent()
+            device = get_device()
             self.model = TQC(
                 "MlpPolicy",
                 self.env,
                 buffer_size=1_000_000,
-                device="cuda",
+                device=str(device),
                 policy_kwargs=self.policy_kwargs,
                 verbose=0,
                 tensorboard_log=self.log_dir,
             )
+            # Compile model for improved performance if supported
+            if self.model.policy is not None:
+                try:
+                    self.model.policy = compile_model_if_supported(self.model.policy)
+                except Exception:
+                    pass  # Skip compilation if it fails, use uncompiled model
+            # NOTE: Stable-Baselines3 stores replay buffer on same device as model (CUDA).
+            # There is no built-in parameter to store buffer on CPU while model is on GPU.
+            # The main memory leak fix (preventing agent accumulation) should resolve GPU memory issues.
+            # If memory is still tight, consider reducing buffer_size (e.g., 500_000 or 250_000).
         callback = self.create_callback(self.env, total_timesteps=total_timesteps)
         tb_log_name = f"tqc_{self.id}"
         self.model.learn(total_timesteps=total_timesteps, callback=callback, tb_log_name=tb_log_name)

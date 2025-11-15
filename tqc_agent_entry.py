@@ -13,6 +13,7 @@ from ai_agents.common.train.impl.generic_agent_manager import GenericAgentManage
 from ai_agents.common.train.impl.single_player_training_engine import SinglePlayerTrainingEngine
 from ai_agents.common.train.impl.tqc_agent import TQCFoosballAgent
 from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import FoosballEnv
+from ai_agents.common.train.impl.performance_utils import setup_performance_optimizations
 
 # ---- env factory (identical wrapping to SAC path) ----
 def tqc_foosball_env_factory(_=None):
@@ -21,7 +22,10 @@ def tqc_foosball_env_factory(_=None):
     return env
 
 if __name__ == "__main__":
-    # Recommended for mac
+    # Performance optimizations for RTX 5090 and Ryzen 9 9950X3D
+    device = setup_performance_optimizations(num_threads=32, num_interop_threads=8)
+    
+    # Recommended for mac (kept for compatibility, but RTX 5090 uses CUDA)
     os.environ.setdefault("MUJOCO_GL", "glfw")
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 

@@ -13,7 +13,10 @@ DIRECTION_CHANGE = 1
 TABLE_MAX_Y_DIM = 65
 BALL_STOPPED_COUNT_THRESHOLD = 10
 MAX_STEPS = 40
-SIM_PATH = os.environ.get('SIM_PATH', '/home/ppy2104/foosballpart2/foosball_sim/v2/foosball_sim.xml')
+# Calculate project root and build relative path to simulation XML
+_dir_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+_default_path = os.path.join(_dir_path, 'foosball_sim', 'v2', 'foosball_sim.xml')
+SIM_PATH = os.environ.get('SIM_PATH', _default_path)
 F32   = np.float64
 INF32 = np.finfo(np.float64).max
 
@@ -27,6 +30,7 @@ class FoosballEnv( MujocoTableRenderMixin, gym.Env, ):
 
         dir_path = os.path.dirname(os.path.realpath(__file__))
         xml_file = SIM_PATH
+        print("[FoosballEnv] Loading XML from:", xml_file)
 
         self.model = mujoco.MjModel.from_xml_path(xml_file)
         self.data = mujoco.MjData(self.model)
