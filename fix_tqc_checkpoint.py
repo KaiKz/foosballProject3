@@ -1,56 +1,41 @@
-import io
-import zipfile
-import torch
-from pathlib import Path
+# fix_tqc_checkpoint.py
+import argparse
+from stable_baselines3.common.save_util import load_from_zip_file, save_to_zip_file
 
-# 1) Paths: change old_path if your best_model.zip lives elsewhere
-old_path = Path("/Users/kaikaizhang/Downloads/foosballpart2/models/0/tqc/best_model/best_model.zip")
-new_path = old_path.with_name("best_model_fixed.zip")
+PREFIX = "_orig_mod."
 
-print(f"[fix] Reading from: {old_path}")
-print(f"[fix] Writing to:   {new_path}")
+def strip_orig_mod_prefix(state_dict):
+    """
+    Take a state_dict (dict of param_name -> tensor) and
+    remove leading '_orig_mod.' if present.
+    """
+    new_sd = {}
+    for k, v in state_dict.items():
+        if k.startswith(PREFIX):
+            new_k = k[len(PREFIX):]
+        else:
+            new_k = k
+        new_sd[new_k] = v
+    return new_sd
 
-if not old_path.exists():
-    raise FileNotFoundError(f"Could not find {old_path}")
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--in-path", required=True, help="Compiled TQC .zip (with _orig_mod.* keys)")
+    parser.add_argument("--out-path", required=True, help="Output fixed .zip")
+    args = parser.parse_args()
 
-with zipfile.ZipFile(old_path, "r") as zin, zipfile.ZipFile(new_path, "w") as zout:
-    for info in zin.infolist():
-        name = info.filename
-        data = zin.read(name)
+    print(f"[fix_tqc_checkpoint] Loading {args.in_path}")
+    data, params, pytorch_variables = load_from_zip_file(args.in_path, device="cpu")
 
-        # We only need to touch the policy weights file.
-        # In SB3 2.x this is called 'policy.pth'.
-        if name.endswith("policy.pth"):
-            print(f"[fix] Patching '{name}'")
+    # params is a dict like {"policy": state_dict, "policy.optimizer": state_dict, ...}
+    for name, value in list(params.items()):
+        if isinstance(value, dict):
+            print(f"[fix_tqc_checkpoint] Fixing param group: {name}")
+            params[name] = strip_orig_mod_prefix(value)
 
-            # Load the state dict from bytes
-            buf = io.BytesIO(data)
-            state_dict = torch.load(buf, map_location="cpu")
+    print(f"[fix_tqc_checkpoint] Saving fixed checkpoint to {args.out_path}")
+    save_to_zip_file(args.out_path, data=data, params=params, pytorch_variables=pytorch_variables)
+    print("[fix_tqc_checkpoint] Done")
 
-            # Show a few original keys for sanity
-            some_keys = list(state_dict.keys())[:5]
-            print("[fix]  Sample original keys:")
-            for k in some_keys:
-                print("       ", k)
-
-            # Build a new state dict with '_orig_mod.' removed from keys
-            new_state_dict = {}
-            for k, v in state_dict.items():
-                new_key = k.replace("_orig_mod.", "")
-                new_state_dict[new_key] = v
-
-            # Show a few new keys for sanity
-            some_new_keys = list(new_state_dict.keys())[:5]
-            print("[fix]  Sample new keys:")
-            for k in some_new_keys:
-                print("       ", k)
-
-            # Save patched state dict back to bytes
-            out_buf = io.BytesIO()
-            torch.save(new_state_dict, out_buf)
-            data = out_buf.getvalue()
-
-        # Write (possibly patched) data to new zip
-        zout.writestr(info, data)
-
-print("[fix] Done. New file saved as:", new_path)
+if __name__ == "__main__":
+    main()

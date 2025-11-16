@@ -44,7 +44,7 @@ class TQCFoosballAgent(FoosballAgent):
         env=None,
         log_dir: str = "./logs",
         model_dir: str = "./models",
-        policy_kwargs: Dict = dict(net_arch=[3000, 3000, 3000, 3000, 3000, 3000, 3000]),
+         policy_kwargs: Dict = dict(net_arch=[512, 512]),
     ):
         self.env = env
         self.model: TQC | None = None
@@ -93,7 +93,7 @@ class TQCFoosballAgent(FoosballAgent):
                 "MlpPolicy",
                 self.env,
                 # keep SAC-aligned core knobs:
-                buffer_size=1_000_000,
+                buffer_size=300_000,
                 device=str(device),
                 policy_kwargs=self.policy_kwargs,
                 verbose=0,
@@ -140,6 +140,7 @@ class TQCFoosballAgent(FoosballAgent):
                 "MlpPolicy",
                 self.env,
                 buffer_size=1_000_000,
+                batch_size=512,
                 device=str(device),
                 policy_kwargs=self.policy_kwargs,
                 verbose=0,

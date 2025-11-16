@@ -9,16 +9,14 @@ from sb3_contrib import TQC
 from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import FoosballEnv
 
 
-def make_env():
-    """
-    Create the Foosball environment.
-    """
+def make_env(antagonist_model=None):
     print("[record_demo] Creating FoosballEnv...")
-    env = FoosballEnv(antagonist_model=None)
+    env = FoosballEnv(antagonist_model=antagonist_model)
     print("[record_demo] Env created.")
     if hasattr(env, "xml_file"):
         print("[record_demo] Env xml_file:", getattr(env, "xml_file", None))
     return env
+
 
 
 def load_model(algo: str, model_path: str, env):
@@ -45,15 +43,26 @@ def run_and_record(
     width: int = 640,
     height: int = 480,
     total_steps: int = 900,
+    self_play: bool = False,
 ):
-    """
-    Run the trained policy for `total_steps` environment steps, recording every
-    frame to `video_path`. The env will automatically reset when it finishes
-    an episode, but the video will be continuous.
-    """
     print("[record_demo] Starting run_and_record...")
-    env = make_env()
-    model = load_model(algo, model_path, env)
+
+    # Load protagonist model first (we need it either way)
+    print("[record_demo] Loading protagonist model...")
+    protagonist_model = load_model(algo, model_path, env=None)
+
+    antagonist_model = None
+    if self_play:
+        print("[record_demo] Using same model as antagonist for self-play.")
+        antagonist_model = protagonist_model  # or load a different zip if you have one
+
+    # Now create env *after* we know antagonist_model
+    env = make_env(antagonist_model=antagonist_model)
+
+    # Re-bind env to protagonist_model so SB3 knows the space
+    protagonist_model.set_env(env)
+    model = protagonist_model
+
 
     if not hasattr(env, "model") or not hasattr(env, "data"):
         raise RuntimeError("FoosballEnv does not expose .model and .data for MuJoCo rendering")
@@ -73,30 +82,49 @@ def run_and_record(
             obs = reset_out
 
         for step in range(1, total_steps + 1):
+            # === CHOOSE ACTION ===
+            # DEBUG mode: zero actions (to see baseline env behavior)
+            # action = np.zeros(env.action_space.shape, dtype=np.float32)
+
+            # NORMAL mode: use the trained policy
             action, _ = model.predict(obs, deterministic=True)
+            if step <= 10:
+                print("[DEBUG ACTION]", step, action[:8]) 
+
+            # === STEP ENV ===
             step_out = env.step(action)
 
-            # Gymnasium: (obs, reward, terminated, truncated, info)
+            # Gymnasium style vs old gym:
             if len(step_out) == 5:
                 obs, reward, terminated, truncated, info = step_out
                 done = terminated or truncated
             else:
-                # Older gym: (obs, reward, done, info)
                 obs, reward, done, info = step_out
 
-            # Render current scene to an RGB frame
+            # === PRINT DEBUG INFO ===
+            if isinstance(info, dict):
+                if step <= 20 or step % 30 == 0:
+                    print(
+                        f"[DEMO] step={step} "
+                        f"reward={reward:.3f} "
+                        f"ball_x={info.get('ball_x', float('nan')):.3f} "
+                        f"ball_y={info.get('ball_y', float('nan')):.3f}"
+                    )
+
+            # === RENDER FRAME ===
             renderer.update_scene(env.data)
             frame = renderer.render()
             frame = np.asarray(frame, dtype=np.uint8)
             writer.append_data(frame)
 
+            # === HANDLE EPISODE END ===
             if done:
-                # Reset env, continue in same video
                 reset_out = env.reset()
                 if isinstance(reset_out, tuple) and len(reset_out) == 2:
                     obs, _ = reset_out
                 else:
                     obs = reset_out
+
 
         print(f"[record_demo] Finished {total_steps} steps total.")
     finally:
