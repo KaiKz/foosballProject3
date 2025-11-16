@@ -13,6 +13,10 @@ TABLE_MAX_Y_DIM = 65
 BALL_STOPPED_COUNT_THRESHOLD = 200
 MAX_STEPS = 40
 
+# Reward shaping: pretend the goal is closer than the physical one
+REWARD_GOAL_Y_FRACTION = 0.2  # 20% of the full distance; tweak as needed
+
+
 # Calculate project root and build relative path to simulation XML
 _dir_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 _default_path = os.path.join(_dir_path, "foosball_sim", "v2", "foosball_sim.xml")
@@ -35,6 +39,29 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
 
         self.model = mujoco.MjModel.from_xml_path(xml_file)
         self.data = mujoco.MjData(self.model)
+        # --- BALL INDEXES (FREE JOINT VERSION) ---
+        self.ball_free_joint = mujoco.mj_name2id(
+            self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_free"
+        )
+        if self.ball_free_joint < 0:
+            raise RuntimeError("Joint 'ball_free' not found in the model")
+
+        self.ball_qpos_adr = self.model.jnt_qposadr[self.ball_free_joint]
+        self.ball_qvel_adr = self.model.jnt_dofadr[self.ball_free_joint]
+                
+        
+        ball_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "ball")
+        ball_x_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
+        ball_y_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_y")
+
+        print("[BODY DEBUG] ball geom body   =", self.model.geom_bodyid[ball_geom_id])
+        print("[BODY DEBUG] ball_x joint body=", self.model.jnt_bodyid[ball_x_id])
+        print("[BODY DEBUG] ball_y joint body=", self.model.jnt_bodyid[ball_y_id])
+        # print("[OPT DEBUG] disableflags before =", self.model.opt.disableflags)
+        # self.model.opt.disableflags = 0
+
+        # print("[OPT DEBUG] disableflags after  =", self.model.opt.disableflags)
+
         # DEBUG: force-enable contact for all geoms
         for g in range(self.model.ngeom):
             self.model.geom_contype[g] = 1
@@ -71,7 +98,7 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
             self._relax_ball_joint_friction()
             self._relax_ball_joint_stiffness()
             self._debug_ball_dofs()
-            self._debug_ball_geoms()
+            # self._debug_ball_geoms()
             # self._disable_ball_contacts()
 
 
@@ -133,67 +160,127 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
         self.antagonist_model = antagonist_model
         self.play_until_goal = play_until_goal
         self.verbose_mode = verbose_mode
+        
+                # ---------------- NEW: protagonist direction & last-ball-y -------------
+        # Let protagonist always try to score toward +y for now.
+        self._direction_sign_for_protagonist = 1.0  # or -1.0 if you flip sides
+        self._last_ball_y = 0.0
 
     # -------------------------------------------------------------------------
     # BASIC SETUP / RESET / STEP
     # -------------------------------------------------------------------------
     def _reset_ball_to_center(self):
-        import mujoco
+        # import mujoco
 
-        ball_x_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
-        ball_y_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_y")
+        # ball_x_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
+        # ball_y_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_y")
 
-        if ball_x_id < 0 or ball_y_id < 0:
-            raise RuntimeError("ball_x or ball_y joint not found in model")
+        # if ball_x_id < 0 or ball_y_id < 0:
+        #     raise RuntimeError("ball_x or ball_y joint not found in model")
 
-        x_qpos_adr = self.model.jnt_qposadr[ball_x_id]
-        y_qpos_adr = self.model.jnt_qposadr[ball_y_id]
+        # x_qpos_adr = self.model.jnt_qposadr[ball_x_id]
+        # y_qpos_adr = self.model.jnt_qposadr[ball_y_id]
 
-        # Put it roughly in the middle of the table
-        self.data.qpos[x_qpos_adr] = 0.0
-        self.data.qpos[y_qpos_adr] = 0.0
+        # # Put it roughly in the middle of the table
+        # self.data.qpos[x_qpos_adr] = 0.0
+        # self.data.qpos[y_qpos_adr] = 0.0
 
-        # optional: small positive z if you later add ball_z
-        mujoco.mj_forward(self.model, self.data)
+        # # optional: small positive z if you later add ball_z
+        # mujoco.mj_forward(self.model, self.data)
+            # Position at center
+        self.data.qpos[self.ball_x_dof] = 0.0
+        self.data.qpos[self.ball_y_dof] = 0.0
+
+        self.data.qvel[self.ball_x_dof] = 0.0
+        self.data.qvel[self.ball_y_dof] = 0.0
+
+        self._last_ball_y = 0.0
 
 
     def set_antagonist_model(self, antagonist_model):
         self.antagonist_model = antagonist_model
 
+    # def reset(self, *, seed=None, options=None):
+    #     super().reset(seed=seed)
+    #     mujoco.mj_resetData(self.model, self.data)
+
+    #     # 1) Center the ball (or keep your randomization if you like)
+    #     ball_x_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
+    #     ball_y_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_y")
+
+    #     x_qpos_adr = self.model.jnt_qposadr[ball_x_id]
+    #     y_qpos_adr = self.model.jnt_qposadr[ball_y_id]
+
+    #     # Centered or lightly randomized
+    #     self.data.qpos[x_qpos_adr] = 0.0
+    #     self.data.qpos[y_qpos_adr] = 0.0
+
+    #     # 2) Give it a small random “serve” velocity in +y or -y
+    #     x_qvel_adr = self.model.jnt_dofadr[ball_x_id]
+    #     y_qvel_adr = self.model.jnt_dofadr[ball_y_id]
+
+    #     # e.g. mainly down table (y), small lateral x
+    #     vx = self.np_random.uniform(-0.5, 0.5)
+    #     vy = self.np_random.uniform(1.0, 2.0)  # towards one goal
+    #     self.data.qvel[x_qvel_adr] = vx
+    #     self.data.qvel[y_qvel_adr] = vy
+
+    #     mujoco.mj_forward(self.model, self.data)
+
+    #     self.simulation_time = 0.0
+    #     self.prev_ball_y = self.data.qpos[y_qpos_adr]
+    #     self.no_progress_steps = 0
+    #     self.ball_stopped_count = 0
+    #     self._debug_step_counter = 0
+
+    #     self._direction_sign_for_protagonist = 1.0
+    #     self._last_ball_y = self.data.qpos[y_qpos_adr]
+
+    #     return self._get_obs(), {}
+    
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
 
-        # 1) Center the ball (or keep your randomization if you like)
-        ball_x_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
-        ball_y_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_y")
+        # Center the ball in 2D; choose some reasonable z (same as XML pos)
+        base_qpos = self.ball_qpos_adr
+        base_qvel = self.ball_qvel_adr
 
-        x_qpos_adr = self.model.jnt_qposadr[ball_x_id]
-        y_qpos_adr = self.model.jnt_qposadr[ball_y_id]
+        self.data.qpos[base_qpos + 0] = 0.0  # x
+        self.data.qpos[base_qpos + 1] = 0.0  # y
+        self.data.qpos[base_qpos + 2] = 0.08  # z, matches XML pos (0 0 0.08)
 
-        # Centered or lightly randomized
-        self.data.qpos[x_qpos_adr] = 0.0
-        self.data.qpos[y_qpos_adr] = 0.0
+        # Identity orientation
+        self.data.qpos[base_qpos + 3] = 1.0  # qw
+        self.data.qpos[base_qpos + 4] = 0.0  # qx
+        self.data.qpos[base_qpos + 5] = 0.0  # qy
+        self.data.qpos[base_qpos + 6] = 0.0  # qz
 
-        # 2) Give it a small random “serve” velocity in +y or -y
-        x_qvel_adr = self.model.jnt_dofadr[ball_x_id]
-        y_qvel_adr = self.model.jnt_dofadr[ball_y_id]
-
-        # e.g. mainly down table (y), small lateral x
+        # 2D serve velocity
         vx = self.np_random.uniform(-0.5, 0.5)
-        vy = self.np_random.uniform(1.0, 2.0)  # towards one goal
-        self.data.qvel[x_qvel_adr] = vx
-        self.data.qvel[y_qvel_adr] = vy
+        vy = self.np_random.uniform(1.0, 2.0)
+
+        self.data.qvel[base_qvel + 0] = vx
+        self.data.qvel[base_qvel + 1] = vy
+        self.data.qvel[base_qvel + 2] = 0.0  # vz
+        self.data.qvel[base_qvel + 3] = 0.0  # wx
+        self.data.qvel[base_qvel + 4] = 0.0  # wy
+        self.data.qvel[base_qvel + 5] = 0.0  # wz
 
         mujoco.mj_forward(self.model, self.data)
 
         self.simulation_time = 0.0
-        self.prev_ball_y = self.data.qpos[y_qpos_adr]
+        ball_pos, _ = self._get_ball_obs()
+        self.prev_ball_y = ball_pos[1]
         self.no_progress_steps = 0
         self.ball_stopped_count = 0
         self._debug_step_counter = 0
 
+        self._direction_sign_for_protagonist = 1.0
+        self._last_ball_y = self.prev_ball_y
+
         return self._get_obs(), {}
+
 
 
     def step(self, protagonist_action):
@@ -226,6 +313,7 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
         mujoco.mj_step(self.model, self.data)
         if self._debug_step_counter < 5:
             self._debug_ball_forces()
+            self._debug_ball_forces_2d()
             self._debug_ball_contacts()
 
         if self._debug_step_counter == 0:
@@ -265,7 +353,7 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
             "reward": float(reward),
         }
 
-
+        self._last_ball_y = ball_y  # update after computing reward
         self._debug_step_counter += 1
         if self._debug_step_counter <= 20:
             print(
@@ -274,15 +362,105 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
             )
 
         return obs, reward, bool(terminated), False, info
+    
+    def _check_goal_scored(self, ball_pos):
+        """
+        Decide whether the protagonist scored or conceded,
+        taking into account the direction sign.
+        """
+        ball_x, ball_y = ball_pos
+        forward_sign = self._direction_sign_for_protagonist
+
+        # Protagonist tries to score at y = +TABLE_MAX_Y_DIM if forward_sign = +1
+        # and at y = -TABLE_MAX_Y_DIM if forward_sign = -1.
+        winning_goal = (
+            (forward_sign > 0 and ball_y >= TABLE_MAX_Y_DIM) or
+            (forward_sign < 0 and ball_y <= -TABLE_MAX_Y_DIM)
+        )
+
+        # Own-goal is the opposite side
+        losing_goal = (
+            (forward_sign > 0 and ball_y <= -TABLE_MAX_Y_DIM) or
+            (forward_sign < 0 and ball_y >= TABLE_MAX_Y_DIM)
+        )
+
+        return winning_goal, losing_goal
+
 
     # -------------------------------------------------------------------------
     # BALL-SPECIFIC DEBUG / FIX HELPERS
     # -------------------------------------------------------------------------
+    def _debug_ball_forces_2d(self):
+        import mujoco
+
+        for joint_name in ["ball_x", "ball_y"]:
+            j_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, joint_name)
+            if j_id < 0:
+                print(f"[FORCE DEBUG] joint {joint_name} not found")
+                continue
+
+            dof = self.model.jnt_dofadr[j_id]
+
+            bias       = float(self.data.qfrc_bias[dof])
+            passive    = float(self.data.qfrc_passive[dof])
+            constraint = float(self.data.qfrc_constraint[dof])
+            actuator   = float(self.data.qfrc_actuator[dof])
+            applied    = float(self.data.qfrc_applied[dof])
+            qvel       = float(self.data.qvel[dof])
+            qacc       = float(self.data.qacc[dof])
+
+            print(
+                f"[FORCE DEBUG] {joint_name} (dof={dof}) | "
+                f"bias={bias:+.6f}, passive={passive:+.6f}, "
+                f"constraint={constraint:+.6f}, actuator={actuator:+.6f}, "
+                f"applied={applied:+.6f}, qvel={qvel:+.6f}, qacc={qacc:+.6f}"
+            )
+
+    # def _debug_ball_contacts(self):
+    #     import mujoco
+
+    #     # Find ball body
+    #     j_ball_x = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
+    #     if j_ball_x < 0:
+    #         print("[CONTACT DEBUG2] ball_x joint not found")
+    #         return
+
+    #     ball_body = self.model.jnt_bodyid[j_ball_x]
+
+    #     if self.data.ncon == 0:
+    #         print("[CONTACT DEBUG2] no contacts this step")
+    #         return
+
+    #     print(f"[CONTACT DEBUG2] ncon = {self.data.ncon}")
+    #     for i in range(self.data.ncon):
+    #         c = self.data.contact[i]
+    #         g1, g2 = c.geom1, c.geom2
+    #         b1 = self.model.geom_bodyid[g1]
+    #         b2 = self.model.geom_bodyid[g2]
+
+    #         # Only show contacts that involve the ball body
+    #         if b1 != ball_body and b2 != ball_body:
+    #             continue
+
+    #         n = np.array(c.frame[:3])     # contact normal
+    #         dist = c.dist                 # penetration (negative = overlapping)
+
+    #         g1_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g1)
+    #         g2_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g2)
+
+    #         # projection of normal on world x axis (ball_x direction)
+    #         proj_on_x = n[0]
+
+    #         print(
+    #             f"[CONTACT DEBUG2] con#{i} "
+    #             f"{g1_name}({g1}) vs {g2_name}({g2}) | "
+    #             f"dist={dist:.6f}, normal={n}, proj_on_x={proj_on_x:.3f}"
+    #         )
+    
     
     def _debug_ball_contacts(self):
         import mujoco
 
-        # Find ball body
         j_ball_x = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
         if j_ball_x < 0:
             print("[CONTACT DEBUG2] ball_x joint not found")
@@ -311,14 +489,13 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
             g1_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g1)
             g2_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g2)
 
-            # projection of normal on world x axis (ball_x direction)
-            proj_on_x = n[0]
-
             print(
                 f"[CONTACT DEBUG2] con#{i} "
                 f"{g1_name}({g1}) vs {g2_name}({g2}) | "
-                f"dist={dist:.6f}, normal={n}, proj_on_x={proj_on_x:.3f}"
+                f"dist={dist:.6f}, normal={n}"
             )
+
+
 
 
     def _disable_ball_contacts(self):
@@ -478,32 +655,50 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
     # -------------------------------------------------------------------------
     # OBSERVATIONS
     # -------------------------------------------------------------------------
-
     def _get_ball_obs(self):
-        ball_x_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
-        ball_y_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_y")
-        # ball_z_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_z")
+        # For the free joint:
+        # qpos: [x, y, z, qw, qx, qy, qz]
+        # qvel: [vx, vy, vz, wx, wy, wz]
+        base_qpos = self.ball_qpos_adr
+        base_qvel = self.ball_qvel_adr
 
-        x_qpos_adr = self.model.jnt_qposadr[ball_x_id]
-        y_qpos_adr = self.model.jnt_qposadr[ball_y_id]
-        # z_qpos_adr = self.model.jnt_qposadr[ball_z_id]
+        x = self.data.qpos[base_qpos + 0]
+        y = self.data.qpos[base_qpos + 1]
+        # z = self.data.qpos[base_qpos + 2]  # if you ever want it
 
-        x_qvel_adr = self.model.jnt_dofadr[ball_x_id]
-        y_qvel_adr = self.model.jnt_dofadr[ball_y_id]
-        # z_qvel_adr = self.model.jnt_dofadr[ball_z_id]
+        vx = self.data.qvel[base_qvel + 0]
+        vy = self.data.qvel[base_qvel + 1]
+        # vz = self.data.qvel[base_qvel + 2]
 
-        ball_pos = [
-            self.data.qpos[x_qpos_adr],
-            self.data.qpos[y_qpos_adr],
-            # self.data.qpos[z_qpos_adr],
-        ]
-        ball_vel = [
-            self.data.qvel[x_qvel_adr],
-            self.data.qvel[y_qvel_adr],
-            # self.data.qvel[z_qvel_adr],
-        ]
-
+        ball_pos = [x, y]
+        ball_vel = [vx, vy]
         return ball_pos, ball_vel
+
+    # def _get_ball_obs(self):
+    #     ball_x_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
+    #     ball_y_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_y")
+    #     # ball_z_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_z")
+
+    #     x_qpos_adr = self.model.jnt_qposadr[ball_x_id]
+    #     y_qpos_adr = self.model.jnt_qposadr[ball_y_id]
+    #     # z_qpos_adr = self.model.jnt_qposadr[ball_z_id]
+
+    #     x_qvel_adr = self.model.jnt_dofadr[ball_x_id]
+    #     y_qvel_adr = self.model.jnt_dofadr[ball_y_id]
+    #     # z_qvel_adr = self.model.jnt_dofadr[ball_z_id]
+
+    #     ball_pos = [
+    #         self.data.qpos[x_qpos_adr],
+    #         self.data.qpos[y_qpos_adr],
+    #         # self.data.qpos[z_qpos_adr],
+    #     ]
+    #     ball_vel = [
+    #         self.data.qvel[x_qvel_adr],
+    #         self.data.qvel[y_qvel_adr],
+    #         # self.data.qvel[z_qvel_adr],
+    #     ]
+
+    #     return ball_pos, ball_vel
 
     def _get_antagonist_obs(self):
         # TODO: fill in if you want antagonist observations
@@ -587,22 +782,40 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
 
     #     return reward
     def _compute_step_reward(self, protagonist_action):
-        ball_obs = self._get_ball_obs()
-        ball_x = ball_obs[0][0]
-        ball_y = ball_obs[0][1]
+        ball_pos, ball_vel = self._get_ball_obs()
+        ball_x, ball_y = ball_pos
 
-        inverse_distance_to_goal = 300 - self.euclidean_goal_distance(ball_x, ball_y)
-        if ball_y > TABLE_MAX_Y_DIM:
-            inverse_distance_to_goal = 0.0
+        # Forward progress since last step
+        forward_sign = self._direction_sign_for_protagonist  # +1 or -1
+        delta_y = forward_sign * (ball_y - self._last_ball_y)
+        delta_y = max(delta_y, 0.0)  # only reward forward
 
-        ctrl_cost = self.control_cost(protagonist_action)  # currently unused but kept
+        # Strongly reward actual forward motion
+        progress_reward = 50.0 * delta_y
 
-        victory = 1000 * DIRECTION_CHANGE if ball_y > TABLE_MAX_Y_DIM else 0
-        loss = -1000 * DIRECTION_CHANGE if ball_y < -1.0 * TABLE_MAX_Y_DIM else 0
+        # Much smaller distance-based shaping toward a *virtual* closer goal
+        virtual_goal_y = forward_sign * (REWARD_GOAL_Y_FRACTION * TABLE_MAX_Y_DIM)
+        dist = abs(virtual_goal_y - ball_y)
+        distance_reward = 5.0 / (1.0 + dist)  # ~0–5
 
-        reward = loss + victory + inverse_distance_to_goal + ctrl_cost
+        # Penalize large actions a bit
+        control_cost = 0.001 * float(np.sum(np.square(protagonist_action)))
 
+        # Goal bonuses/penalties still use the real physical goal (TABLE_MAX_Y_DIM)
+        winning_goal, losing_goal = self._check_goal_scored(ball_pos)
+        victory_reward = 1000.0 if winning_goal else 0.0
+        own_goal_penalty = -1000.0 if losing_goal else 0.0
+
+        reward = (
+            progress_reward
+            + distance_reward
+            + victory_reward
+            + own_goal_penalty
+            - control_cost
+        )
         return reward
+
+
 
 
 

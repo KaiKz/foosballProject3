@@ -1,0 +1,12 @@
+With contacts enabled → constraint = -99 on step 0 → velocity gets nuked.
+
+With contacts disabled for the ball → it moves perfectly at 2 m/s along ball_x
+
+
+
+[FORCE DEBUG] dof=16 | ... constraint=-99.012505 ...
+[CONTACT DEBUG2] ncon = 43
+[CONTACT DEBUG2] con#42 ball(97) vs table(38) | dist=-3.633551, normal=[... 0 0 1], proj_on_x=0.000
+
+
+dist=-3.633551 → the ball is 3.6 units inside the table collider (massive penetration)
