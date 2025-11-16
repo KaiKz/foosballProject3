@@ -1,30 +1,34 @@
+# random_rollout_sanity.py
 import numpy as np
 from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import FoosballEnv
 
-def main():
-    env = FoosballEnv(verbose_mode=True)
+env = FoosballEnv(
+    antagonist_model=None,
+    play_until_goal=False,
+    verbose_mode=False,   # or True if you want spam
+    debug_free_ball=False # real training settings
+)
+
+num_episodes = 5
+max_steps    = 500
+
+for ep in range(num_episodes):
     obs, info = env.reset()
-    print("Initial obs shape:", obs.shape)
+    ep_rewards = 0.0
+    ball_path = []
 
-    steps = 500
-    for t in range(steps):
-        action = env.action_space.sample()
+    for t in range(max_steps):
+        action = env.action_space.sample()  # random protagonist
         obs, reward, terminated, truncated, info = env.step(action)
-
-        if t < 20:
-            print(
-                f"t={t:03d} "
-                f"ball_x={info.get('ball_x', float('nan')):.3f} "
-                f"ball_y={info.get('ball_y', float('nan')):.3f} "
-                f"reward={reward:.3f} "
-                f"terminated={terminated} truncated={truncated}"
-            )
+        ep_rewards += reward
+        ball_path.append((info["ball_x"], info["ball_y"]))
 
         if terminated or truncated:
-            print(f"Episode ended at t={t}, resetting...")
-            obs, info = env.reset()
+            break
 
-    env.close()
+    ball_xs = [p[0] for p in ball_path]
+    ball_ys = [p[1] for p in ball_path]
 
-if __name__ == "__main__":
-    main()
+    print(f"Episode {ep}: steps={len(ball_path)}, return={ep_rewards:.2f}, "
+          f"ball_x_range=({min(ball_xs):.3f},{max(ball_xs):.3f}), "
+          f"ball_y_range=({min(ball_ys):.3f},{max(ball_ys):.3f})")

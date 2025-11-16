@@ -12,17 +12,17 @@
     <asset>
       <!-- <texture name="ball_pattern" type="2d" file="ball_texture.jpg"/>
       <material name="pink_ball" texture="ball_pattern"/> -->
-  
-      <mesh name="table" file="asset/foosball_table/foosball_table.obj"> <!-- already scaled down (0.1)-->
-        
-      </mesh>
 
-      <mesh name="guy" file="asset/foosman/mesh_down_foosman.obj" scale='0.1 0.1 0.1' >
-           
-      </mesh>
+      <!-- Visual-only table mesh asset -->
+      <mesh name="table" file="asset/foosball_table/foosball_table.obj"/> <!-- already scaled down (0.1) -->
 
-      <mesh name="handle" file="asset/handle/foosball_handle.obj" scale='0.1 0.1 0.1'/>
+      <!-- Player mesh -->
+      <mesh name="guy" file="asset/foosman/mesh_down_foosman.obj" scale="0.1 0.1 0.1"/>
+
+      <!-- Handle mesh -->
+      <mesh name="handle" file="asset/handle/foosball_handle.obj" scale="0.1 0.1 0.1"/>
     </asset>
+
   
     <option sdf_iterations="20" sdf_initpoints="40"  >
       <flag contact="enable" />
@@ -42,12 +42,24 @@
 
     <worldbody>
       <!-- TABLE-->
-      <body name="table" euler="90 90 0" pos="0 0 0">
+      <!-- <body name="table" euler="90 90 0" pos="0 0 0"> -->
         <!-- <inertial pos="-0.000002765 0.000000008 1.053097" quat="1 0 0 0" mass="54.82168339136806" 
                   diaginertia="7049.04002 1362.00289 8372.77663"/> -->
-        <geom type="mesh" name="table" mesh="table" rgba='1.0 1.0 1.0 1' group="2">
-        </geom>
+        <!-- <geom type="mesh" name="table" mesh="table" rgba='1.0 1.0 1.0 1' group="2"> -->
+        <!-- </geom> -->
+      <!-- </body> -->
+      <body name="table" euler="90 90 0" pos="0 0 0">
+        <!-- <inertial pos="-0.000002765 0.000000008 1.053097" quat="1 0 0 0" mass="54.82168339136806" 
+                      diaginertia="7049.04002 1362.00289 8372.77663"/> -->
+        <geom type="mesh"
+              name="table"
+              mesh="table"
+              rgba="1 1 1 1"
+              group="2"
+              contype="0"
+              conaffinity="0" />
       </body>
+
 
 
     <!-- Yellow Player--><!-- Yellow Player--><!-- Yellow Player--><!-- Yellow Player-->
@@ -368,12 +380,20 @@
 
 
       <!-- MATCH BALL-->
-      <body name="ball" pos="0 -4 1.705">
+      <!-- <body name="ball" pos="0 -4 1.705">
         <joint name="ball_x" type="slide" axis="1 0 0"  frictionloss="20"/>
         <joint name="ball_y" type="slide" axis="0 1 0" frictionloss="20"/>
         <geom name="ball" type="sphere" size="1.73355" mass="0.1" rgba="0.8 0.3 0.5 1"
               friction="0.01 0.1 10"  />
+      </body> -->
+
+      <body name="ball" pos="0 0 1.9">
+        <joint name="ball_x" type="slide" axis="1 0 0" frictionloss="0"/>
+        <joint name="ball_y" type="slide" axis="0 1 0" frictionloss="0"/>
+        <geom name="ball" type="sphere" size="1.73355" mass="0.1"
+              rgba="0.8 0.3 0.5 1" friction="0 0 0" />
       </body>
+
   
     </worldbody>
   

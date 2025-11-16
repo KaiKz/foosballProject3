@@ -27,7 +27,7 @@ RODS = ["_goal_", "_def_", "_mid_", "_attack_"]
 class FoosballEnv(MujocoTableRenderMixin, gym.Env):
     metadata = {"render.modes": ["human", "rgb_array"]}
 
-    def __init__(self, antagonist_model=None, play_until_goal=False, verbose_mode=False,  debug_free_ball=True):
+    def __init__(self, antagonist_model=None, play_until_goal=False, verbose_mode=False,  debug_free_ball=False):
         super(FoosballEnv, self).__init__()
 
         xml_file = SIM_PATH
@@ -35,6 +35,18 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
 
         self.model = mujoco.MjModel.from_xml_path(xml_file)
         self.data = mujoco.MjData(self.model)
+        # DEBUG: force-enable contact for all geoms
+        for g in range(self.model.ngeom):
+            self.model.geom_contype[g] = 1
+            self.model.geom_conaffinity[g] = 1
+            
+        print("=== GEOM CONTACT DEBUG ===")
+        for g in range(self.model.ngeom):
+            name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g)
+            ct = self.model.geom_contype[g]
+            ca = self.model.geom_conaffinity[g]
+            print(f"geom {g:2d} name={name} contype={ct} conaffinity={ca}")
+            
 
         # ---------- GLOBAL DEBUG: DOF / GEOM / OPT PARAMS (NO MODIFICATIONS HERE) ----------
         print("[GLOBAL DEBUG] max dof_damping before =", float(self.model.dof_damping.max()))
@@ -53,14 +65,14 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
         print("[OPT DEBUG] density         =", self.model.opt.density)
 
         # ---------- BALL-SPECIFIC DEBUG & FIXES ----------
-        self._debug_ball_dofs()
 
-        self._relax_ball_joint_friction()
-        self._relax_ball_joint_stiffness()
         if debug_free_ball:
             # Only in kick_ball_test / debugging
+            self._relax_ball_joint_friction()
+            self._relax_ball_joint_stiffness()
+            self._debug_ball_dofs()
             self._debug_ball_geoms()
-            self._disable_ball_contacts()
+            # self._disable_ball_contacts()
 
 
 
@@ -152,16 +164,28 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
         super().reset(seed=seed)
         mujoco.mj_resetData(self.model, self.data)
 
+        # 1) Center the ball (or keep your randomization if you like)
         ball_x_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
         ball_y_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_y")
 
         x_qpos_adr = self.model.jnt_qposadr[ball_x_id]
         y_qpos_adr = self.model.jnt_qposadr[ball_y_id]
 
-        xy_random = np.random.normal(loc=[-0.5, 0.0], scale=[0.5, 0.5]).astype(F32)
+        # Centered or lightly randomized
+        self.data.qpos[x_qpos_adr] = 0.0
+        self.data.qpos[y_qpos_adr] = 0.0
 
-        self.data.qpos[x_qpos_adr] = xy_random[0]
-        self.data.qpos[y_qpos_adr] = xy_random[1]
+        # 2) Give it a small random “serve” velocity in +y or -y
+        x_qvel_adr = self.model.jnt_dofadr[ball_x_id]
+        y_qvel_adr = self.model.jnt_dofadr[ball_y_id]
+
+        # e.g. mainly down table (y), small lateral x
+        vx = self.np_random.uniform(-0.5, 0.5)
+        vy = self.np_random.uniform(1.0, 2.0)  # towards one goal
+        self.data.qvel[x_qvel_adr] = vx
+        self.data.qvel[y_qvel_adr] = vy
+
+        mujoco.mj_forward(self.model, self.data)
 
         self.simulation_time = 0.0
         self.prev_ball_y = self.data.qpos[y_qpos_adr]
@@ -171,12 +195,13 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
 
         return self._get_obs(), {}
 
+
     def step(self, protagonist_action):
         protagonist_action = np.clip(
             protagonist_action, self.action_space.low, self.action_space.high
         )
 
-        if self._debug_step_counter == 0:
+        if self._debug_step_counter == 1:
             _, vel0 = self._get_ball_obs()
             print("[STEP DEBUG] BEFORE first mj_step, ball_vel =", vel0)
 
@@ -199,9 +224,9 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
         ball_pos_before = np.array(self._get_ball_obs()[0][:2], dtype=float)
 
         mujoco.mj_step(self.model, self.data)
-    # 🔍 NEW: inspect forces on ball_x after physics step
         if self._debug_step_counter < 5:
             self._debug_ball_forces()
+            self._debug_ball_contacts()
 
         if self._debug_step_counter == 0:
             pos1, vel1 = self._get_ball_obs()
@@ -253,6 +278,48 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
     # -------------------------------------------------------------------------
     # BALL-SPECIFIC DEBUG / FIX HELPERS
     # -------------------------------------------------------------------------
+    
+    def _debug_ball_contacts(self):
+        import mujoco
+
+        # Find ball body
+        j_ball_x = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
+        if j_ball_x < 0:
+            print("[CONTACT DEBUG2] ball_x joint not found")
+            return
+
+        ball_body = self.model.jnt_bodyid[j_ball_x]
+
+        if self.data.ncon == 0:
+            print("[CONTACT DEBUG2] no contacts this step")
+            return
+
+        print(f"[CONTACT DEBUG2] ncon = {self.data.ncon}")
+        for i in range(self.data.ncon):
+            c = self.data.contact[i]
+            g1, g2 = c.geom1, c.geom2
+            b1 = self.model.geom_bodyid[g1]
+            b2 = self.model.geom_bodyid[g2]
+
+            # Only show contacts that involve the ball body
+            if b1 != ball_body and b2 != ball_body:
+                continue
+
+            n = np.array(c.frame[:3])     # contact normal
+            dist = c.dist                 # penetration (negative = overlapping)
+
+            g1_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g1)
+            g2_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g2)
+
+            # projection of normal on world x axis (ball_x direction)
+            proj_on_x = n[0]
+
+            print(
+                f"[CONTACT DEBUG2] con#{i} "
+                f"{g1_name}({g1}) vs {g2_name}({g2}) | "
+                f"dist={dist:.6f}, normal={n}, proj_on_x={proj_on_x:.3f}"
+            )
+
 
     def _disable_ball_contacts(self):
         import mujoco
@@ -382,11 +449,16 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
         if ball_x_id < 0:
             raise RuntimeError("ball_x joint 'ball_x' not found in model")
 
-        qpos_adr = self.model.jnt_qposadr[ball_x_id]
-        # Instead of velocity, directly set position:
-        self.data.qpos[qpos_adr] = 0.2   # move 0.2 m along x
+        dof_adr = self.model.jnt_dofadr[ball_x_id]
+        print("[DEBUG] ball_x joint id:", ball_x_id, "dof index:", dof_adr)
 
-        print("[DEBUG] TELEPORT ball_x qpos to", self.data.qpos[qpos_adr])
+        self.data.qvel[dof_adr] = vx
+        print(
+            "[DEBUG] set ball_x qvel to",
+            vx,
+            " -> self.data.qvel[dof_adr] =",
+            self.data.qvel[dof_adr],
+        )
 
 
     def _relax_ball_joint_stiffness(self):

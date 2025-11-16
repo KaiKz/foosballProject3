@@ -11,7 +11,7 @@ def get_device():
     Get the standardized device for PyTorch operations.
     Returns CUDA device if available, otherwise CPU.
     """
-    return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    return torch.device("cuda" if torch.cuda.is_available() else "mps")
 
 
 def enable_tf32():
