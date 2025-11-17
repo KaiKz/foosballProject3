@@ -702,7 +702,7 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
 
     def _get_antagonist_obs(self):
         # TODO: fill in if you want antagonist observations
-        return None
+        return self._get_obs().copy()
 
     def _get_obs(self):
         ball_pos, ball_vel = self._get_ball_obs()
