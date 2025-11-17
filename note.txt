@@ -1,15 +1,28 @@
-With contacts enabled → constraint = -99 on step 0 → velocity gets nuked.
 
-With contacts disabled for the ball → it moves perfectly at 2 m/s along ball_x
+Observation:
+with contacts enabled, constraint = -99 on step 0, velocity gets nuked
+With contacts disabled for the ball, it moves perfectly at 2 m/s along ball_x
 
 
-
+Probelm
 [FORCE DEBUG] dof=16 | ... constraint=-99.012505 ...
 [CONTACT DEBUG2] ncon = 43
 [CONTACT DEBUG2] con#42 ball(97) vs table(38) | dist=-3.633551, normal=[... 0 0 1], proj_on_x=0.000
 
-
+Reson:
 dist=-3.633551 → the ball is 3.6 units inside the table collider (massive penetration)
 
 
-python record_demo.py   --algo tqc   --model-path /home/a2rlab/Research/foosballProject3/models/0/tqc/best_model/best_model_fixed_2.zip   --video-path tqc_demo_no_selfplay.mp4   --total-steps 1500
+
+
+
+
+physics
+the ball joint was jamming the ball from rotating, i temporarily made it a 'free ball' for this milstone
+the ball was deeply penetrated in （-3.633551）, the contacts solver forces a constraint=-99.012505 to the ball, so the ball is smashed and static
+physics is generally good
+if i resize the ball, the solver detects a gigantic ball penetrated to the table wihch trggers a huge repelling force +z
+
+
+the rendering problem:
+

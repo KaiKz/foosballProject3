@@ -397,10 +397,23 @@
               <!-- friction="0.01 0.1 10"/> -->
       <!-- </body> -->
 
-      <body name="ball_body" pos="0 0 0.08">
+      <!-- <body name="ball_body" pos="0 0 0.08">
           <joint name="ball_free" type="free"/>
           <geom name="ball" type="sphere" size="0.015" density="1000"
                 contype="1" conaffinity="1"/>
+      </body> -->
+
+      <body name="ball_body" pos="0 0 0.08">
+        <joint name="ball_free" type="free"/>
+
+        <!-- Physics ball: unchanged, used for dynamics -->
+        <geom name="ball_phys" type="sphere" size="0.015" density="1000"
+              contype="1" conaffinity="1" rgba="0.5 0.5 0.5 1"/>
+
+        <!-- Visual-only ball: bigger, no collisions, no mass -->
+        <geom name="ball_visual" type="sphere" size="1.5"
+              contype="0" conaffinity="0" mass="0"
+              rgba="1 0 1 0.8" group="2"/>
       </body>
 
   
