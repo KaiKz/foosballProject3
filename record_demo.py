@@ -47,7 +47,7 @@ def create_topdown_camera(model: mujoco.MjModel) -> mujoco.MjvCamera:
     cam.lookat[2] = 0.2  # around table top / ball height
 
     # Bring camera close enough so the ball isn't microscopic
-    cam.distance = 6.0   # you can tweak: 5.0 closer, 7.0 farther
+    cam.distance = 120.0   # you can tweak: 5.0 closer, 7.0 farther
 
     # True top-down
     cam.elevation = -90.0
@@ -70,7 +70,7 @@ def run_and_record(
     width: int = 640,
     height: int = 480,
     total_steps: int = 900,
-    self_play: bool = False,
+    self_play: bool = True,
 ):
     print("[record_demo] Starting run_and_record...")
 
@@ -100,7 +100,7 @@ def run_and_record(
     print("[DEBUG] ball rgba before:", env.model.geom_rgba[ball_geom_id])
 
     # Make ball clearly visible but not ridiculous
-    env.model.geom_size[ball_geom_id][0] = 0.04  # radius (was 0.02)
+    env.model.geom_size[ball_geom_id][0] = 1.5  # radius (was 0.02)
     env.model.geom_rgba[ball_geom_id] = np.array(
         [1.0, 0.0, 1.0, 1.0], dtype=np.float32
     )  # bright magenta
