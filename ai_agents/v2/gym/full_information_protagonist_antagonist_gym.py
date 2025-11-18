@@ -50,13 +50,13 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
         self.ball_qvel_adr = self.model.jnt_dofadr[self.ball_free_joint]
                 
         
-        ball_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "ball")
-        ball_x_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
-        ball_y_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_y")
+        # ball_geom_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_GEOM, "ball")
+        # ball_x_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_x")
+        # ball_y_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_JOINT, "ball_y")
 
-        print("[BODY DEBUG] ball geom body   =", self.model.geom_bodyid[ball_geom_id])
-        print("[BODY DEBUG] ball_x joint body=", self.model.jnt_bodyid[ball_x_id])
-        print("[BODY DEBUG] ball_y joint body=", self.model.jnt_bodyid[ball_y_id])
+        # print("[BODY DEBUG] ball geom body   =", self.model.geom_bodyid[ball_geom_id])
+        # print("[BODY DEBUG] ball_x joint body=", self.model.jnt_bodyid[ball_x_id])
+        # print("[BODY DEBUG] ball_y joint body=", self.model.jnt_bodyid[ball_y_id])
         # print("[OPT DEBUG] disableflags before =", self.model.opt.disableflags)
         # self.model.opt.disableflags = 0
 
@@ -76,22 +76,22 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
             
 
         # ---------- GLOBAL DEBUG: DOF / GEOM / OPT PARAMS (NO MODIFICATIONS HERE) ----------
-        print("[GLOBAL DEBUG] max dof_damping before =", float(self.model.dof_damping.max()))
-        print("[GLOBAL DEBUG] nonzero dof_damping idx =", np.nonzero(self.model.dof_damping)[0])
+        # print("[GLOBAL DEBUG] max dof_damping before =", float(self.model.dof_damping.max()))
+        # print("[GLOBAL DEBUG] nonzero dof_damping idx =", np.nonzero(self.model.dof_damping)[0])
 
-        print("[GLOBAL DEBUG] max dof_frictionloss before =", float(self.model.dof_frictionloss.max()))
-        print("[GLOBAL DEBUG] nonzero dof_frictionloss idx =", np.nonzero(self.model.dof_frictionloss)[0])
+        # print("[GLOBAL DEBUG] max dof_frictionloss before =", float(self.model.dof_frictionloss.max()))
+        # print("[GLOBAL DEBUG] nonzero dof_frictionloss idx =", np.nonzero(self.model.dof_frictionloss)[0])
 
         # Just peek at the first few geom frictions
         for g in range(min(5, self.model.ngeom)):
             old = np.array(self.model.geom_friction[g], copy=True)
-            print(f"[GLOBAL DEBUG] geom {g} friction = {old}")
+        #     print(f"[GLOBAL DEBUG] geom {g} friction = {old}")
 
-        print("[OPT DEBUG] timestep        =", self.model.opt.timestep)
-        print("[OPT DEBUG] viscosity       =", self.model.opt.viscosity)
-        print("[OPT DEBUG] density         =", self.model.opt.density)
+        # print("[OPT DEBUG] timestep        =", self.model.opt.timestep)
+        # print("[OPT DEBUG] viscosity       =", self.model.opt.viscosity)
+        # print("[OPT DEBUG] density         =", self.model.opt.density)
 
-        # ---------- BALL-SPECIFIC DEBUG & FIXES ----------
+        # # ---------- BALL-SPECIFIC DEBUG & FIXES ----------
 
         if debug_free_ball:
             # Only in kick_ball_test / debugging
@@ -313,8 +313,8 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
         mujoco.mj_step(self.model, self.data)
         if self._debug_step_counter < 5:
             self._debug_ball_forces()
-            self._debug_ball_forces_2d()
-            self._debug_ball_contacts()
+            # self._debug_ball_forces_2d()
+            # self._debug_ball_contacts()
 
         if self._debug_step_counter == 0:
             pos1, vel1 = self._get_ball_obs()

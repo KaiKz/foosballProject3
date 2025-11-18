@@ -1,8 +1,6 @@
-from ai_agents.common.train.impl.sac_agent import SACFoosballAgent
 from ai_agents.common.train.interface.agent_manager import AgentManager
 import torch
 import gc
-
 class GenericAgentManager(AgentManager):
     def __init__(self, num_agents: int, environment_generator, agent_class):
         self.num_agents = num_agents
