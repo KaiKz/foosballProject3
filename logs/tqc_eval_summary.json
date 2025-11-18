@@ -1,0 +1,6 @@
+{
+  "n_episodes": 20,
+  "average_reward": 2631.720860096598,
+  "average_last_distance_to_goal": 16.21530725653067,
+  "average_ball_speed": 599.669508304987
+}

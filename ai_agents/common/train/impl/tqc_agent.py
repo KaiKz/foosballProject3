@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Dict
+import numpy as np
 
 from sb3_contrib import TQC  # pip install sb3-contrib
 from stable_baselines3.common.callbacks import EvalCallback, BaseCallback, CallbackList
@@ -31,6 +32,87 @@ class TqdmCallback(BaseCallback):
     def _on_training_end(self) -> None:
         if self.pbar is not None:
             self.pbar.close()
+
+
+class FoosballTrainingMonitorCallback(BaseCallback):
+    """
+    Logs foosball-specific metrics:
+      - mean episode reward (from ep_info_buffer)
+      - mean max |ball_y| per episode (how far the ball travels down the table)
+      - approximate goal rate (episodes where |max_y| > threshold)
+    """
+    def __init__(self, window: int = 50, log_every_steps: int = 10_000, verbose: int = 1):
+        super().__init__(verbose)
+        self.window = window
+        self.log_every_steps = log_every_steps
+
+        # per-env ephemeral state
+        self.current_max_y = None
+        # episode-level buffers
+        self.episode_max_y = []
+
+    def _on_training_start(self) -> None:
+        n_envs = self.training_env.num_envs if hasattr(self.training_env, "num_envs") else 1
+        self.current_max_y = np.zeros(n_envs, dtype=np.float32)
+
+    def _on_step(self) -> bool:
+        # infos: list of dicts, one per env
+        infos = self.locals.get("infos", [])
+        rewards = self.locals.get("rewards", [])
+        dones = self.locals.get("dones", [])
+
+        if len(infos) == 0:
+            return True
+
+        n_envs = len(infos)
+        # grow state if VecEnv size changed for some reason
+        if self.current_max_y is None or len(self.current_max_y) != n_envs:
+            self.current_max_y = np.zeros(n_envs, dtype=np.float32)
+
+        for i in range(n_envs):
+            info = infos[i] or {}
+            ball_y = info.get("ball_y", None)
+            if ball_y is not None:
+                # track max |y| for this episode/env
+                self.current_max_y[i] = max(self.current_max_y[i], abs(float(ball_y)))
+
+            done = bool(dones[i]) if isinstance(dones, (list, np.ndarray)) else False
+            if done:
+                # end of episode for env i
+                self.episode_max_y.append(self.current_max_y[i])
+                self.current_max_y[i] = 0.0
+
+        # Periodic logging
+        if self.num_timesteps % self.log_every_steps == 0 and len(self.episode_max_y) > 0:
+            window_max_y = self.episode_max_y[-self.window:]
+            mean_abs_max_y = float(np.mean(window_max_y))
+
+            # approximate goal rate: episodes where |max_y| is close to table end
+            GOAL_Y_THRESHOLD = 60.0  # TABLE_MAX_Y_DIM ~65 → 60 is “almost goal”
+            goal_flags = [1.0 if y > GOAL_Y_THRESHOLD else 0.0 for y in window_max_y]
+            goal_rate = float(np.mean(goal_flags))
+
+            # mean episodic reward from SB3's ep_info_buffer
+            mean_ep_reward = None
+            if hasattr(self.model, "ep_info_buffer") and len(self.model.ep_info_buffer) > 0:
+                rewards_window = [ep_info["r"] for ep_info in list(self.model.ep_info_buffer)[-self.window:]]
+                mean_ep_reward = float(np.mean(rewards_window))
+
+            # log to TensorBoard
+            self.logger.record("foosball/mean_abs_max_ball_y", mean_abs_max_y)
+            self.logger.record("foosball/goal_rate", goal_rate)
+            if mean_ep_reward is not None:
+                self.logger.record("foosball/mean_episode_reward_window", mean_ep_reward)
+
+            if self.verbose > 0:
+                msg = f"[FOOSBALL TRAIN] steps={self.num_timesteps} "
+                if mean_ep_reward is not None:
+                    msg += f"mean_ep_reward(last_{self.window})={mean_ep_reward:.1f} "
+                msg += f"mean_max_|y|(last_{self.window})={mean_abs_max_y:.2f} "
+                msg += f"goal_rate(last_{self.window})={goal_rate:.2%}"
+                print(msg)
+
+        return True
 
 
 class TQCFoosballAgent(FoosballAgent):
@@ -128,9 +210,19 @@ class TQCFoosballAgent(FoosballAgent):
             render=False,
             deterministic=True,
         )
+        foosball_monitor = FoosballTrainingMonitorCallback(
+            window=50,
+            log_every_steps=10_000,
+            verbose=1,
+        )
+
+        callbacks = [eval_cb, foosball_monitor]
         if show_progress and os.getenv("DISPLAY_PROGRESS", "1") != "0":
-            return CallbackList([TqdmCallback(total_timesteps=total_timesteps), eval_cb])
-        return eval_cb
+            callbacks.insert(0, TqdmCallback(total_timesteps=total_timesteps))
+
+        if len(callbacks) == 1:
+            return callbacks[0]
+        return CallbackList(callbacks)
 
     def learn(self, total_timesteps: int) -> None:
         if self.model is None:
