@@ -1,6 +1,10 @@
-# tqc_agent_entry.py
+# sac_v2_agent_entry.py
 import os
 import argparse
+import math
+import json
+from pathlib import Path
+
 import numpy as np
 import torch
 
@@ -10,16 +14,17 @@ from pathlib import Path
 # torch.set_default_dtype(torch.float32)
 
 from stable_baselines3.common.monitor import Monitor
-from gymnasium.wrappers import TransformObservation
 
 from ai_agents.common.train.impl.generic_agent_manager import GenericAgentManager
 from ai_agents.common.train.impl.single_player_training_engine import SinglePlayerTrainingEngine
-from ai_agents.common.train.impl.tqc_agent import TQCFoosballAgent
+from ai_agents.common.train.impl.sac_agent import SACFoosballAgent
 from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import FoosballEnv
 from ai_agents.common.train.impl.performance_utils import setup_performance_optimizations
 
-# ---- env factory (identical wrapping to SAC path) ----
-def tqc_foosball_env_factory(_=None):
+
+# ---- env factory (aligned with TQC path, but using SAC agent) ----
+def sac_foosball_env_factory(_=None):
+    # single-player: no trained antagonist for now
     env = FoosballEnv(antagonist_model=None)
     env = Monitor(env)
     return env
@@ -126,30 +131,30 @@ def evaluate_tqc_model(
 
 
 if __name__ == "__main__":
-    # Performance optimizations for RTX 5090 and Ryzen 9 9950X3D
+    # Performance optimizations for RTX 5090 and Ryzen 9 9950X3D (same as TQC script)
     device = setup_performance_optimizations(num_threads=32, num_interop_threads=8)
-    
+
     # Recommended for mac (kept for compatibility, but RTX 5090 uses CUDA)
     os.environ.setdefault("MUJOCO_GL", "glfw")
     os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-    parser = argparse.ArgumentParser(description="Train or test TQC model.")
+    parser = argparse.ArgumentParser(description="Train or test SAC model (v2 FoosballEnv).")
     parser.add_argument("-t", "--test", help="Test mode", action="store_true")
     args = parser.parse_args()
 
     model_dir = "./models"
     log_dir = "./logs"
-    total_epochs = 15
-    epoch_timesteps = int(100000)
+    total_epochs = 15          # match TQC
+    epoch_timesteps = int(100000)  # match TQC
 
-    # Same orchestration as SAC, just swap the Agent class
-    agent_manager = GenericAgentManager(1, tqc_foosball_env_factory, TQCFoosballAgent)
+    # Same orchestration pattern as TQC, just swap the Agent class + env factory
+    agent_manager = GenericAgentManager(1, sac_foosball_env_factory, SACFoosballAgent)
     agent_manager.initialize_training_agents()
     agent_manager.initialize_frozen_best_models()
 
     engine = SinglePlayerTrainingEngine(
         agent_manager=agent_manager,
-        environment_generator=tqc_foosball_env_factory,
+        environment_generator=sac_foosball_env_factory,
     )
 
     if not args.test:
@@ -158,7 +163,13 @@ if __name__ == "__main__":
             epoch_timesteps=epoch_timesteps,
             cycle_timesteps=10000,
         )
+        engine.train(
+            total_epochs=total_epochs,
+            epoch_timesteps=epoch_timesteps,
+            cycle_timesteps=10000,
+        )
 
+    # Run whatever built-in test loop you already rely on
     # Run whatever built-in test loop you already rely on
     engine.test()
 

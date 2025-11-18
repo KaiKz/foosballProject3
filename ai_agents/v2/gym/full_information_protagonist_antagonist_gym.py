@@ -258,7 +258,7 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
 
         # 2D serve velocity
         vx = self.np_random.uniform(-0.5, 0.5)
-        vy = self.np_random.uniform(1.0, 2.0)
+        vy = self.np_random.uniform(1.0, 1500.0)
 
         self.data.qvel[base_qvel + 0] = vx
         self.data.qvel[base_qvel + 1] = vy
