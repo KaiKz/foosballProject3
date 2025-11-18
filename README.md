@@ -1,3 +1,4 @@
-# Foosball_CU
-Design and development of a professional foosball playing AI.
-The directory is organized under 3 teams - Mechanical Assets, Simulation, and AI agents
+
+how to run the demo code:
+
+python record_demo.py   --algo tqc   --model-path /home/a2rlab/Research/foosballProject3/models/0/tqc/best_model/best_model_fixed_2.zip   --video-path tqc_demo_no_selfplay.mp4   --total-steps 1500
