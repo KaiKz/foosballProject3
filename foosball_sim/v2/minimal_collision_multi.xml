@@ -1,0 +1,60 @@
+<mujoco model="ball_block_actuated">
+  <option gravity="0 0 -9.81">
+    <flag contact="enable"/>
+  </option>
+
+  <worldbody>
+    <!-- Ground -->
+    <geom name="ground"
+          type="plane"
+          pos="0 0 0"
+          size="1 1 0.01"
+          contype="1" conaffinity="1"
+          friction="0.8 0.1 0.01"/>
+
+    <!-- Ball in the middle -->
+    <body name="ball_body" pos="0 0 0.3">
+      <joint name="ball_free" type="free" damping="0.01"/>
+      <geom name="ball"
+            type="sphere"
+            size="0.1"
+            density="1000"
+            contype="1" conaffinity="1"
+            friction="0.4 0.1 0.01"
+            rgba="0.8 0.3 0.5 1"/>
+    </body>
+
+    <!-- Left "paddle" block that can slide in +y and hit the ball -->
+    <body name="block_left" pos="0 -0.5 0.1">
+      <!-- Slide joint along y axis -->
+      <joint name="block_left_slide"
+             type="slide"
+             axis="0 1 0"
+             range="-0.5 0.5"/>
+      <geom name="block_left_geom"
+            type="box"
+            size="0.1 0.1 0.1"
+            contype="1" conaffinity="1"
+            friction="0.8 0.1 0.01"
+            rgba="0.2 0.2 0.8 1"/>
+    </body>
+
+    <!-- Static right block -->
+    <body name="block_right" pos="0 0.5 0.1">
+      <geom name="block_right_geom"
+            type="box"
+            size="0.1 0.1 0.1"
+            contype="1" conaffinity="1"
+            friction="0.8 0.1 0.01"
+            rgba="0.2 0.8 0.2 1"/>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <!-- Position controller for the sliding block -->
+    <position name="block_left_ctrl"
+              joint="block_left_slide"
+              kp="2000"
+              ctrlrange="-0.5 0.5"/>
+  </actuator>
+</mujoco>
