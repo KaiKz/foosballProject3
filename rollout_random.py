@@ -1,56 +1,50 @@
-# # random_rollout_sanity.py
-# import numpy as np
-# from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import FoosballEnv
-
-# env = FoosballEnv(
-#     antagonist_model=None,
-#     play_until_goal=False,
-#     verbose_mode=False,   # or True if you want spam
-#     debug_free_ball=False # real training settings
-# )
-
-# num_episodes = 5
-# max_steps    = 500
-
-# for ep in range(num_episodes):
-#     obs, info = env.reset()
-#     ep_rewards = 0.0
-#     ball_path = []
-
-#     for t in range(max_steps):
-#         action = env.action_space.sample()  # random protagonist
-#         obs, reward, terminated, truncated, info = env.step(action)
-#         ep_rewards += reward
-#         ball_path.append((info["ball_x"], info["ball_y"]))
-
-#         if terminated or truncated:
-#             break
-
-#     ball_xs = [p[0] for p in ball_path]
-#     ball_ys = [p[1] for p in ball_path]
-
-#     print(f"Episode {ep}: steps={len(ball_path)}, return={ep_rewards:.2f}, "
-#           f"ball_x_range=({min(ball_xs):.3f},{max(ball_xs):.3f}), "
-#           f"ball_y_range=({min(ball_ys):.3f},{max(ball_ys):.3f})")
-
-import numpy as np
 from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import FoosballEnv
+import numpy as np
+import time
 
-env = FoosballEnv(antagonist_model=None, verbose_mode=False, debug_free_ball=False)
+env = FoosballEnv(antagonist_model=None, verbose_mode=True, render_mode="human")
 
-for ep in range(3):
-    obs, _ = env.reset()
-    print(f"\n=== EPISODE {ep} ===")
-    for t in range(200):
-        action = env.action_space.sample().astype(np.float32)
-        obs, reward, terminated, truncated, info = env.step(action)
+obs, info = env.reset()
 
-        ball_x = info["ball_x"]
-        ball_y = info["ball_y"]
-        print(f"t={t:03d} ball=({ball_x:.3f}, {ball_y:.3f}) reward={reward:.3f}")
+for t in range(20000):
+    a = np.zeros(env.action_space.shape, dtype=np.float32)
+    # a[6] = 1.0   # slide attack rod
+    # a[7] =  1.0    # rotate attack rod
 
-        if terminated or truncated:
-            print(f"Episode ended at t={t}, terminated={terminated}, truncated={truncated}")
-            break
+    obs, r, terminated, truncated, info = env.step(a)
+    env.render()
 
-env.close()
+    if terminated or truncated:
+        break
+
+print("Simulation finished – keeping viewer open. Close the window or Ctrl+C in the terminal to quit.")
+
+# Keep window open
+t = 0
+while True:
+    # protagonist (yellow) actions
+    a = np.zeros(env.protagonist_action_size, dtype=np.float32)
+
+    # --- YELLOW ATTACK ROD TIMING ---
+    # e.g. steps 20–40: yellow rod rotates to kick the ball
+    if 20 <= t < 40:
+        a[7] = -1.0    # y_attack_rotation (scale happens inside env)
+        a[7] = 1.0 
+    # --- BLACK ATTACK ROD TIMING ---
+    # e.g. steps 80–100: black rod rotates to kick the ball back
+    if 80 <= t < 100:
+        env.data.ctrl[13] = -2.5   # b_attack_rotation (same scale as yellow rot_range)
+    else:
+        env.data.ctrl[13] = 0.0   # stop black rod when not “kicking”
+
+    obs, reward, terminated, truncated, info = env.step(a)
+    env.render()
+    time.sleep(0.02)
+    t += 1
+
+    if terminated or truncated:
+        # reset timing + state, and give yourself a moment to see reset
+        obs, info = env.reset()
+        env.render()
+        time.sleep(2.0)
+        t = 0

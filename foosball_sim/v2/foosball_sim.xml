@@ -60,7 +60,54 @@
               conaffinity="0" />
       </body>
 
+      <!-- Playfield plane (the surface the ball rolls on) -->
+<body name="field" pos="0 -1 0">
+  <!-- type="plane": normal is +z by default -->
+  <!-- size = [half_width, half_length, thickness_unused] -->
+<geom name="field_plane"
+      type="plane"
+      size="40 80 0.1"
+      friction="0.01 0.1 0.001"
+      contype="1"
+      conaffinity="1" />
 
+</body>
+
+
+
+<!-- Example side wall (positive y) -->
+<body name="wall_pos_y" pos="0 63 1">   <!-- adjust pos/size -->
+  <geom name="wall_pos_y"
+        type="box"
+        size="40 1 10"  
+        contype="1"
+        conaffinity="1" />
+</body>
+
+<body name="wall_pos_x" pos="0 -63 1">   <!-- adjust pos/size -->
+  <geom name="wall_pos_x"
+        type="box"
+        size="40 1 10"  
+        contype="1"
+        conaffinity="1" />
+</body>
+
+<body name="wall_pos_z" pos="40 0 1">   
+  <geom name="wall_pos_z"
+        type="box"
+        size="1 60 5"  
+        contype="1"
+        conaffinity="1" />
+</body>
+
+
+<body name="wall_pos_i" pos="-40 0 1">  
+  <geom name="wall_pos_i"
+        type="box"
+        size="1 60 5"  
+        contype="1"
+        conaffinity="1" />
+</body>
 
     <!-- Yellow Player--><!-- Yellow Player--><!-- Yellow Player--><!-- Yellow Player-->
       <!-- Yellow goalie Rod-->
@@ -403,18 +450,28 @@
                 contype="1" conaffinity="1"/>
       </body> -->
 
-      <body name="ball_body" pos="0 0 0.08">
+      <!-- <body name="ball_body" pos="0 0 0.03">
         <joint name="ball_free" type="free"/>
 
-        <!-- Physics ball: unchanged, used for dynamics -->
         <geom name="ball_phys" type="sphere" size="0.015" density="1000"
               contype="1" conaffinity="1" rgba="0.5 0.5 0.5 1"/>
 
-        <!-- Visual-only ball: bigger, no collisions, no mass -->
         <geom name="ball_visual" type="sphere" size="1.5"
               contype="0" conaffinity="0" mass="0"
               rgba="1 0 1 0.8" group="2"/>
-      </body>
+      </body> -->
+<body name="ball" pos="0 -4 1.75">
+  <joint name="ball_x" type="slide" axis="1 0 0" frictionloss="0" damping="0.01"/>
+  <joint name="ball_y" type="slide" axis="0 1 0" frictionloss="0" damping="0.01"/>
+
+  <geom name="ball" type="sphere" size="1.73355" mass="0.1"
+        rgba="0.8 0.3 0.5 1"
+        friction="0.01 0.1 10"
+        contype="1" conaffinity="1"/>
+</body>
+
+
+
 
   
     </worldbody>
