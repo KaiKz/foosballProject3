@@ -17,9 +17,16 @@ from ai_agents.common.train.impl.performance_utils import setup_performance_opti
 
 
 def sac_foosball_env_factory(x=None):
-    env = FoosballEnv(antagonist_model=None)
+    # Training env: no on-screen rendering
+    env = FoosballEnv(
+        antagonist_model=None,
+        render_mode=None,
+        play_until_goal=False,
+        verbose_mode=False,
+    )
     env = Monitor(env)
     return env
+
 
 if __name__ == '__main__':
     # Performance optimizations for RTX 5090 and Ryzen 9 9950X3D

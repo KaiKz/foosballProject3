@@ -67,9 +67,10 @@
 <geom name="field_plane"
       type="plane"
       size="40 80 0.1"
-      friction="0.01 0.1 0.001"
+      friction="0.002 0.0001 0.0001"
       contype="1"
       conaffinity="1" />
+
 
 </body>
 
@@ -464,10 +465,11 @@
   <joint name="ball_x" type="slide" axis="1 0 0" frictionloss="0" damping="0.01"/>
   <joint name="ball_y" type="slide" axis="0 1 0" frictionloss="0" damping="0.01"/>
 
-  <geom name="ball" type="sphere" size="1.73355" mass="0.1"
-        rgba="0.8 0.3 0.5 1"
-        friction="0.01 0.1 10"
-        contype="1" conaffinity="1"/>
+<geom name="ball" type="sphere" size="1.73355" mass="0.1"
+      rgba="0.8 0.3 0.5 1"
+      friction="0.003 0.0001 0.0001"
+      contype="1" conaffinity="1"/>
+
 </body>
 
 
