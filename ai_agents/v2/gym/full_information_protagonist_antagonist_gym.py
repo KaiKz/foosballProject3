@@ -31,6 +31,10 @@ GOAL_LINE_Y = 60.0          # where the goal line is in y
 GOAL_HALF_WIDTH = 10.0      # posts at x ∈ [-10, +10]  (tune this)
 
 
+# Consider the ball "stuck" if it's moving slower than this or barely changing position
+STAGNANT_VEL_EPS = 0.15      # was 5e-3; much looser
+STAGNANT_POS_EPS = 0.002     # a bit stricter on positional motion
+STAGNANT_STEPS   = 40        # how many consecutive steps before we call it stagnant
 
 # Calculate project root and build relative path to simulation XML
 _dir_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -1265,23 +1269,39 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
         return np.linalg.norm(ball_vel) > 0.01
 
     def _determine_progression(self):
-        # ball_y = self._get_ball_obs()[0][1]
-
-        # if self.prev_ball_y is not None:
-        #     if ball_y > self.prev_ball_y:
-        #         self.no_progress_steps = 0
-        #     else:
-        #         self.no_progress_steps += 1
-
-        # self.prev_ball_y = ball_y
         """
-        Track whether the ball has been essentially still for many steps.
-        This will drive the 'ball_stagnant' termination.
+        Track whether the ball has effectively stopped / is stuck.
+        We look at BOTH velocity magnitude and position changes,
+        and treat it as 'stagnant' if EITHER suggests it's basically not moving.
         """
-        if self._is_ball_moving():
-            self.ball_stopped_count = 0
-        else:
+        (ball_x, ball_y), ball_vel = self._get_ball_obs()
+        speed = float(np.linalg.norm(ball_vel))
+
+        if self.prev_ball_y is None:
+            self.prev_ball_y = ball_y
+
+        pos_delta = abs(ball_y - self.prev_ball_y)
+
+        vel_still = speed < STAGNANT_VEL_EPS
+        pos_still = pos_delta < STAGNANT_POS_EPS
+
+        # 👈 key change: OR instead of AND
+        if vel_still or pos_still:
             self.ball_stopped_count += 1
+        else:
+            self.ball_stopped_count = 0
+
+        if self.verbose_mode and self._debug_step_counter % 50 == 0:
+            print(
+                f"[STAGNATION DEBUG] step={self._debug_step_counter} "
+                f"speed={speed:.4f}, pos_delta={pos_delta:.4f}, "
+                f"vel_still={vel_still}, pos_still={pos_still}, "
+                f"ball_stopped_count={self.ball_stopped_count}"
+            )
+
+        self.prev_ball_y = ball_y
+
+
 
 
     # @property
