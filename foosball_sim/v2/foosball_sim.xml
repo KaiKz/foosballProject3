@@ -75,22 +75,61 @@
 
 
 
-<!-- Example side wall (positive y) -->
-<body name="wall_pos_y" pos="0 63 1">   <!-- adjust pos/size -->
-  <geom name="wall_pos_y"
+<!-- Positive-y back wall with central goal mouth (-10..+10 open) -->
+<body name="wall_pos_y_left" pos="-25 63 1">
+  <!-- span x from -40 to -10: half-length = 15, centered at -25 -->
+  <geom name="wall_pos_y_left"
         type="box"
-        size="40 1 10"  
+        size="15 1 10"
         contype="1"
         conaffinity="1" />
 </body>
 
-<body name="wall_pos_x" pos="0 -63 1">   <!-- adjust pos/size -->
-  <geom name="wall_pos_x"
+<body name="wall_pos_y_right" pos="25 63 1">
+  <!-- span x from +10 to +40 -->
+  <geom name="wall_pos_y_right"
         type="box"
-        size="40 1 10"  
+        size="15 1 10"
         contype="1"
         conaffinity="1" />
 </body>
+
+<!-- Negative-y back wall with central goal mouth (-10..+10 open) -->
+<body name="wall_neg_y_left" pos="-25 -63 1">
+  <geom name="wall_neg_y_left"
+        type="box"
+        size="15 1 10"
+        contype="1"
+        conaffinity="1" />
+</body>
+
+<body name="wall_neg_y_right" pos="25 -63 1">
+  <geom name="wall_neg_y_right"
+        type="box"
+        size="15 1 10"
+        contype="1"
+        conaffinity="1" />
+</body>
+
+<!-- Visual goal frame at +y side (no collision) -->
+<body name="goal_frame_pos" pos="0 60 5">
+  <!-- left post -->
+  <geom type="box" size="0.5 0.5 5"
+        pos="-10 0 0"
+        rgba="1 1 1 1"
+        contype="0" conaffinity="0" />
+  <!-- right post -->
+  <geom type="box" size="0.5 0.5 5"
+        pos="10 0 0"
+        rgba="1 1 1 1"
+        contype="0" conaffinity="0" />
+  <!-- crossbar -->
+  <geom type="box" size="10 0.5 0.5"
+        pos="0 0 5"
+        rgba="1 1 1 1"
+        contype="0" conaffinity="0" />
+</body>
+
 
 <body name="wall_pos_z" pos="40 0 1">   
   <geom name="wall_pos_z"
