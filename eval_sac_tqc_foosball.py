@@ -15,10 +15,11 @@ import numpy as np
 import torch
 from stable_baselines3 import SAC
 from sb3_contrib import TQC
+import os
 import matplotlib
 matplotlib.use("Agg")           # non-interactive backend, safe on servers
 import matplotlib.pyplot as plt
-
+# import times
 from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import FoosballEnv
 
 
@@ -27,8 +28,8 @@ from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import Foosbal
 # ---------------------------------------------------------------------
 
 # Safety cap so an episode can never run forever during evaluation.
-MAX_STEPS_PER_EPISODE = 500   # adjust if you want shorter/longer eval episodes
-
+MAX_STEPS_PER_EPISODE = 3000   # adjust if you want shorter/longer eval episodes
+render=False,
 
 def get_eval_device():
     """
@@ -65,7 +66,7 @@ def make_eval_env(antagonist_model=None, render_mode=None):
     """
     env = FoosballEnv(
         antagonist_model=antagonist_model,
-        render_mode=render_mode,
+        render_mode="human" if render else None,
         verbose_mode=False,
         play_until_goal=False,
     )
@@ -122,6 +123,7 @@ def evaluate_model_vs_passive(
 
             if render:
                 env.render()
+                # time.sleep(1/60.0) 
 
         if not done and step_count >= MAX_STEPS_PER_EPISODE:
             print(
@@ -198,6 +200,7 @@ def evaluate_head_to_head(
         while (not done) and (step_count < MAX_STEPS_PER_EPISODE):
             if render:
                 env.render()
+                # time.sleep(1/60.0) 
 
             action, _ = protagonist_model.predict(obs, deterministic=True)
             obs, reward, terminated, truncated, info = env.step(action)
@@ -263,26 +266,26 @@ def evaluate_head_to_head(
 
 
 def _summarize_eval_dict(d):
-    """Compute basic summary stats from an eval stats dict."""
-    returns = np.array(d["returns"], dtype=np.float32)
-    steps = np.array(d["steps"], dtype=np.float32)
+    import numpy as np
 
-    wins = float(d.get("wins", 0))
-    losses = float(d.get("losses", 0))
-    goals = float(d.get("goals", 0))
-    n = max(len(returns), 1)
+    returns = np.array(d.get("returns", []), dtype=float)
+    lengths = np.array(d.get("episode_lengths", []), dtype=float)
+
+    goals_raw = d.get("goals", [])
+    # goals_raw might be a list of bools / 0-1 or a scalar
+    if isinstance(goals_raw, list):
+        total_goals = float(sum(goals_raw))
+    else:
+        total_goals = float(goals_raw)
 
     summary = {
-        "label": d["label"],
-        "episodes": len(returns),
-        "mean_return": float(returns.mean()) if len(returns) else 0.0,
-        "std_return": float(returns.std()) if len(returns) else 0.0,
-        "mean_steps": float(steps.mean()) if len(steps) else 0.0,
-        "win_rate": wins / n,
-        "loss_rate": losses / n,
-        "goal_rate": goals / n,
+        "num_episodes": len(returns),
+        "avg_return": float(returns.mean()) if len(returns) > 0 else 0.0,
+        "avg_length": float(lengths.mean()) if len(lengths) > 0 else 0.0,
+        "total_goals": total_goals,
     }
     return summary
+
 
 
 def save_eval_summary_and_plots(
@@ -400,13 +403,13 @@ if __name__ == "__main__":
             sac_model,
             "SAC (yellow) vs passive black",
             n_episodes=50,
-            render=False,
+            render=True,
         )
         tqc_vs_passive = evaluate_model_vs_passive(
             tqc_model,
             "TQC (black) vs passive black",
             n_episodes=50,
-            render=False,
+            render=True,
         )
 
         # ---------- 2) Head-to-head: SAC (yellow) vs TQC (black) ----------
@@ -415,7 +418,7 @@ if __name__ == "__main__":
             antagonist_model=tqc_model,    # black
             label="SAC (yellow) vs TQC (black)",
             n_episodes=50,
-            render=False,                  # set True if you want to *watch*, but slower
+            render=True,                  # set True if you want to *watch*, but slower
         )
 
         # ---------- 3) Save CSV + PNG plots ----------
@@ -429,13 +432,13 @@ if __name__ == "__main__":
         print("[EVAL] Done. Check 'foosball_plots/' for PNGs and CSV.")
 
         # OPTIONAL: run a tiny visual demo just to watch:
-        # evaluate_head_to_head(
-        #     protagonist_model=sac_model,
-        #     antagonist_model=tqc_model,
-        #     label="SAC (yellow) vs TQC (black) [visual demo]",
-        #     n_episodes=5,
-        #     render=True,
-        # )
+        evaluate_head_to_head(
+            protagonist_model=sac_model,
+            antagonist_model=tqc_model,
+            label="SAC (yellow) vs TQC (black) [visual demo]",
+            n_episodes=5,
+            render=True,
+        )
 
     except KeyboardInterrupt:
         print("\n[INTERRUPTED] Evaluation stopped by user.", flush=True)

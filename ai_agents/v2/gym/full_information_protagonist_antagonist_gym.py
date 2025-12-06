@@ -6,7 +6,7 @@ from gymnasium import spaces
 import mujoco
 import numpy as np
 import mujoco.viewer as mj_viewer
-
+import time
 from ai_agents.v2.gym.mujoco_table_render_mixin import MujocoTableRenderMixin
 
 DIRECTION_CHANGE = 1
@@ -76,6 +76,11 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
                 continue
             if any(name.startswith(p) for p in PLAYER_GEOM_PREFIXES):
                 self.player_geom_ids.append(gid)
+                # --- NEW: passive-lifted black when there is no antagonist model ---
+        self.passive_lifted_black = antagonist_model is None
+        if self.passive_lifted_black:
+            self._make_black_players_nonblocking()
+            
         self.attack_slide_joint = mujoco.mj_name2id(
             self.model, mujoco.mjtObj.mjOBJ_JOINT, "y_attack_linear"  # <-- use correct name
         )
@@ -347,6 +352,39 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
                 f"  con#{i}: {name1}({g1}) <-> {name2}({g2}) | "
                 f"dist={c.dist:.6f}, normal={np.array(c.frame[:3])}"
             )
+
+    def _make_black_players_nonblocking(self):
+        """
+        In passive mode (antagonist_model is None), make the black side
+        "lifted" by disabling *all* collisions for geoms belonging to
+        black-side bodies.
+
+        We detect them by checking either:
+          - geom name starts with 'b_'
+          - OR the geom's body name starts with 'b_'
+        """
+        import mujoco
+
+        print("[LIFT] Passive mode: disabling collisions for black-side geoms")
+
+        for g in range(self.model.ngeom):
+            geom_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g) or ""
+
+            body_id = self.model.geom_bodyid[g]
+            body_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_BODY, body_id) or ""
+
+            is_black_geom = geom_name.startswith("b_") or body_name.startswith("b_")
+
+            if is_black_geom:
+                # Debug print once so you can see what got lifted
+                print(
+                    f"[LIFT] geom {g:02d} "
+                    f"name='{geom_name}' body='{body_name}' "
+                    f"contype={self.model.geom_contype[g]} "
+                    f"conaff={self.model.geom_conaffinity[g]} -> 0"
+                )
+                self.model.geom_contype[g] = 0
+                self.model.geom_conaffinity[g] = 0
 
 
 
