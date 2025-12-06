@@ -15,8 +15,6 @@ DIRECTION_CHANGE = 1
 GOAL_LINE_Y = 60.0              # center of goal line along +y / -y
 TABLE_MAX_Y_DIM = GOAL_LINE_Y   # keep this for legacy uses
 
-BALL_STOPPED_COUNT_THRESHOLD = 200
-
 # Reward shaping: pretend the goal is closer than the physical one
 REWARD_GOAL_Y_FRACTION = 0.5    # half-way to the real goal, tweak as you like
 
@@ -35,6 +33,7 @@ GOAL_HALF_WIDTH = 10.0      # posts at x ∈ [-10, +10]  (tune this)
 STAGNANT_VEL_EPS = 0.15      # was 5e-3; much looser
 STAGNANT_POS_EPS = 0.002     # a bit stricter on positional motion
 STAGNANT_STEPS   = 40        # how many consecutive steps before we call it stagnant
+BALL_STOPPED_COUNT_THRESHOLD = STAGNANT_STEPS
 
 # Calculate project root and build relative path to simulation XML
 _dir_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -392,170 +391,227 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
 
     #     return self._get_obs(), {}
     
-    def reset(self, *, seed=None, options=None):
-        super().reset(seed=seed)
-        mujoco.mj_resetData(self.model, self.data)
+    # def reset(self, *, seed=None, options=None):
+    #     super().reset(seed=seed)
+    #     mujoco.mj_resetData(self.model, self.data)
 
-        mujoco.mj_forward(self.model, self.data)
-        DEBUG_FORCE_OVERLAP = False
-
-
-        # --- Find attack guy pose ---
-        attack_guy_geom_id = mujoco.mj_name2id(
-            self.model, mujoco.mjtObj.mjOBJ_GEOM, "y_attack_guy2"
-        )
-        if attack_guy_geom_id < 0:
-            # Fallback: old "table center" behavior
-            attack_guy_x = 0.0
-            attack_guy_y = 0.0
-            attack_guy_z = 0.08
-        else:
-            guy_xyz = self.data.geom_xpos[attack_guy_geom_id].copy()
-            attack_guy_x = float(guy_xyz[0])
-            attack_guy_y = float(guy_xyz[1])
-            attack_guy_z = float(guy_xyz[2])
+    #     mujoco.mj_forward(self.model, self.data)
+    #     DEBUG_FORCE_OVERLAP = False
 
 
-
-        # --- Compute safe offset: ball_radius + guy_radius + margin ---
-        ball_radius = float(self.model.geom_size[self.ball_geom_id][0])
-        guy_radius = float(self.model.geom_rbound[attack_guy_geom_id])
-
-        # guy_type = self.model.geom_type[attack_guy_geom_id]
-        # guy_size = self.model.geom_size[attack_guy_geom_id]
-
-        # if guy_type == mujoco.mjtGeom.mjGEOM_SPHERE:
-        #     guy_radius = float(guy_size[0])
-        # elif guy_type in (mujoco.mjtGeom.mjGEOM_CAPSULE,
-        #                 mujoco.mjtGeom.mjGEOM_CYLINDER):
-        #     guy_radius = float(guy_size[0])
-        # elif guy_type == mujoco.mjtGeom.mjGEOM_BOX:
-        #     guy_radius = float(guy_size[1])  # half-length in y
-        # else:
-        #     guy_radius = 0.05
-
-        margin = 0  # start small
-        safe_offset = ball_radius + guy_radius + margin
-
-        bp_x = self.ball_x_qpos_adr
-        bp_y = self.ball_y_qpos_adr
-        bv_x = self.ball_x_qvel_adr
-        bv_y = self.ball_y_qvel_adr
-
-        # Place ball in front of the attack guy (x, y only)
-        self.data.qpos[bp_x] = attack_guy_x 
-        self.data.qpos[bp_y] = attack_guy_y +safe_offset
-
-        # Zero planar velocity
-        self.data.qvel[bv_x] = 0.0
-        self.data.qvel[bv_y] = 0.0
+    #     # --- Find attack guy pose ---
+    #     attack_guy_geom_id = mujoco.mj_name2id(
+    #         self.model, mujoco.mjtObj.mjOBJ_GEOM, "y_attack_guy2"
+    #     )
+    #     if attack_guy_geom_id < 0:
+    #         # Fallback: old "table center" behavior
+    #         attack_guy_x = 0.0
+    #         attack_guy_y = 0.0
+    #         attack_guy_z = 0.08
+    #     else:
+    #         guy_xyz = self.data.geom_xpos[attack_guy_geom_id].copy()
+    #         attack_guy_x = float(guy_xyz[0])
+    #         attack_guy_y = float(guy_xyz[1])
+    #         attack_guy_z = float(guy_xyz[2])
 
 
 
-        mujoco.mj_forward(self.model, self.data)
-        if DEBUG_FORCE_OVERLAP:
-            # 1) Force ball *center* to exactly attack guy's geom position
-            self.data.qpos[bp + 0] = attack_guy_x
-            self.data.qpos[bp + 1] = attack_guy_y
-            self.data.qpos[bp + 2] = attack_guy_z
+    #     # --- Compute safe offset: ball_radius + guy_radius + margin ---
+    #     ball_radius = float(self.model.geom_size[self.ball_geom_id][0])
+    #     guy_radius = float(self.model.geom_rbound[attack_guy_geom_id])
 
-            # keep orientation / velocities as you already set them
-            mujoco.mj_forward(self.model, self.data)
+    #     # guy_type = self.model.geom_type[attack_guy_geom_id]
+    #     # guy_size = self.model.geom_size[attack_guy_geom_id]
 
-            # 2) Print contacts involving the ball
-            print("=== DEBUG: AFTER FORCED OVERLAP ===")
-            print("ball geom_xpos:", self.data.geom_xpos[self.ball_geom_id])
-            print("guy  geom_xpos:", self.data.geom_xpos[attack_guy_geom_id])
-            print("ncon:", self.data.ncon)
+    #     # if guy_type == mujoco.mjtGeom.mjGEOM_SPHERE:
+    #     #     guy_radius = float(guy_size[0])
+    #     # elif guy_type in (mujoco.mjtGeom.mjGEOM_CAPSULE,
+    #     #                 mujoco.mjtGeom.mjGEOM_CYLINDER):
+    #     #     guy_radius = float(guy_size[0])
+    #     # elif guy_type == mujoco.mjtGeom.mjGEOM_BOX:
+    #     #     guy_radius = float(guy_size[1])  # half-length in y
+    #     # else:
+    #     #     guy_radius = 0.05
 
-            for i in range(self.data.ncon):
-                c = self.data.contact[i]
-                g1, g2 = c.geom1, c.geom2
-                if g1 != self.ball_geom_id and g2 != self.ball_geom_id:
-                    continue
-                g1_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g1)
-                g2_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g2)
-                print(
-                    f"  contact {i}: {g1_name}({g1}) <-> {g2_name}({g2}), dist={c.dist}"
-                )
+    #     margin = 0  # start small
+    #     safe_offset = ball_radius + guy_radius + margin
 
-            # 3) Early-return so the usual contact-resolution + bookkeeping doesn't run
-            #    (we only care about contacts for this test)
-            return self._get_obs(), {}
+    #     bp_x = self.ball_x_qpos_adr
+    #     bp_y = self.ball_y_qpos_adr
+    #     bv_x = self.ball_x_qvel_adr
+    #     bv_y = self.ball_y_qvel_adr
 
-        # --- Contact resolution loop: remove ball–player overlap ---
-        def ball_in_contact_with_player(model, data):
-            for i in range(data.ncon):
-                c = data.contact[i]
-                g1, g2 = c.geom1, c.geom2
-                if ((g1 == self.ball_geom_id and g2 in self.player_geom_ids) or
-                    (g2 == self.ball_geom_id and g1 in self.player_geom_ids)):
-                    return True, c
-            return False, None
+    #     # Place ball in front of the attack guy (x, y only)
+    #     self.data.qpos[bp_x] = attack_guy_x 
+    #     self.data.qpos[bp_y] = attack_guy_y +safe_offset
 
-        max_tries = 50
-        step = 0.01
-        tries = 0
+    #     # Zero planar velocity
+    #     self.data.qvel[bv_x] = 0.0
+    #     self.data.qvel[bv_y] = 0.0
 
-        while True:
-            touching, c = ball_in_contact_with_player(self.model, self.data)
-            if not touching:
-                break
 
-            # c.dist < 0 -> penetration depth
-            # c.frame[:3] is contact normal in world coords.
-            # Move ball along normal to fix penetration.
-            penetration = -float(c.dist)  # positive
-            eps = 1e-3
-            shift = penetration + eps
 
-            n = np.array(c.frame[:3], dtype=float)  # contact normal
-            self.data.qpos[bp + 0] += shift * n[0]
-            self.data.qpos[bp + 1] += shift * n[1]
-            self.data.qpos[bp + 2] += shift * n[2]
+    #     mujoco.mj_forward(self.model, self.data)
+    #     if DEBUG_FORCE_OVERLAP:
+    #         # 1) Force ball *center* to exactly attack guy's geom position
+    #         self.data.qpos[bp + 0] = attack_guy_x
+    #         self.data.qpos[bp + 1] = attack_guy_y
+    #         self.data.qpos[bp + 2] = attack_guy_z
 
-            mujoco.mj_forward(self.model, self.data)
+    #         # keep orientation / velocities as you already set them
+    #         mujoco.mj_forward(self.model, self.data)
 
-            tries += 1
-            if tries >= max_tries:
-                if self.verbose_mode:
-                    print("[WARN] couldn't fully resolve ball-player contact")
-                break
+    #         # 2) Print contacts involving the ball
+    #         print("=== DEBUG: AFTER FORCED OVERLAP ===")
+    #         print("ball geom_xpos:", self.data.geom_xpos[self.ball_geom_id])
+    #         print("guy  geom_xpos:", self.data.geom_xpos[attack_guy_geom_id])
+    #         print("ncon:", self.data.ncon)
+
+    #         for i in range(self.data.ncon):
+    #             c = self.data.contact[i]
+    #             g1, g2 = c.geom1, c.geom2
+    #             if g1 != self.ball_geom_id and g2 != self.ball_geom_id:
+    #                 continue
+    #             g1_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g1)
+    #             g2_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g2)
+    #             print(
+    #                 f"  contact {i}: {g1_name}({g1}) <-> {g2_name}({g2}), dist={c.dist}"
+    #             )
+
+    #         # 3) Early-return so the usual contact-resolution + bookkeeping doesn't run
+    #         #    (we only care about contacts for this test)
+    #         return self._get_obs(), {}
+
+    #     # --- Contact resolution loop: remove ball–player overlap ---
+    #     def ball_in_contact_with_player(model, data):
+    #         for i in range(data.ncon):
+    #             c = data.contact[i]
+    #             g1, g2 = c.geom1, c.geom2
+    #             if ((g1 == self.ball_geom_id and g2 in self.player_geom_ids) or
+    #                 (g2 == self.ball_geom_id and g1 in self.player_geom_ids)):
+    #                 return True, c
+    #         return False, None
+
+    #     max_tries = 50
+    #     step = 0.01
+    #     tries = 0
+
+    #     while True:
+    #         touching, c = ball_in_contact_with_player(self.model, self.data)
+    #         if not touching:
+    #             break
+
+    #         # c.dist < 0 -> penetration depth
+    #         # c.frame[:3] is contact normal in world coords.
+    #         # Move ball along normal to fix penetration.
+    #         penetration = -float(c.dist)  # positive
+    #         eps = 1e-3
+    #         shift = penetration + eps
+
+    #         n = np.array(c.frame[:3], dtype=float)  # contact normal
+    #         self.data.qpos[bp + 0] += shift * n[0]
+    #         self.data.qpos[bp + 1] += shift * n[1]
+    #         self.data.qpos[bp + 2] += shift * n[2]
+
+    #         mujoco.mj_forward(self.model, self.data)
+
+    #         tries += 1
+    #         if tries >= max_tries:
+    #             if self.verbose_mode:
+    #                 print("[WARN] couldn't fully resolve ball-player contact")
+    #             break
 
             
-        if self.verbose_mode:
-            print("[RESET DEBUG] after reposition + player-resolution:")
-            self._debug_ball_pos()
+    #     if self.verbose_mode:
+    #         print("[RESET DEBUG] after reposition + player-resolution:")
+    #         self._debug_ball_pos()
 
-            # print all ball contacts with ANY geom
-            if self.data.ncon == 0:
-                print("[RESET DEBUG] no contacts at reset")
-            else:
-                print(f"[RESET DEBUG] ncon={self.data.ncon}")
-                for i in range(self.data.ncon):
-                    c = self.data.contact[i]
-                    g1, g2 = c.geom1, c.geom2
-                    if g1 != self.ball_geom_id and g2 != self.ball_geom_id:
-                        continue
-                    g1_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g1)
-                    g2_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g2)
-                    print(
-                        f"   ball contact: {g1_name}({g1}) <-> {g2_name}({g2}) "
-                        f"dist={c.dist:.6f}"
-                    )
+    #         # print all ball contacts with ANY geom
+    #         if self.data.ncon == 0:
+    #             print("[RESET DEBUG] no contacts at reset")
+    #         else:
+    #             print(f"[RESET DEBUG] ncon={self.data.ncon}")
+    #             for i in range(self.data.ncon):
+    #                 c = self.data.contact[i]
+    #                 g1, g2 = c.geom1, c.geom2
+    #                 if g1 != self.ball_geom_id and g2 != self.ball_geom_id:
+    #                     continue
+    #                 g1_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g1)
+    #                 g2_name = mujoco.mj_id2name(self.model, mujoco.mjtObj.mjOBJ_GEOM, g2)
+    #                 print(
+    #                     f"   ball contact: {g1_name}({g1}) <-> {g2_name}({g2}) "
+    #                     f"dist={c.dist:.6f}"
+    #                 )
 
-        # --- Final book-keeping as before ---
+    #     # --- Final book-keeping as before ---
+    #     self.simulation_time = 0.0
+    #     ball_pos, _ = self._get_ball_obs()
+    #     self.prev_ball_y = ball_pos[1]
+    #     self.no_progress_steps = 0
+    #     self.ball_stopped_count = 0
+    #     self._debug_step_counter = 0
+
+    #     self._direction_sign_for_protagonist = 1.0
+    #     self._last_ball_y = self.prev_ball_y
+
+    #     return self._get_obs(), {}
+
+    def reset(self, *, seed=None, options=None):
+        # Let Gymnasium set up RNG etc.
+        super().reset(seed=seed)
+
+        # Reset MuJoCo state to default qpos/qvel
+        mujoco.mj_resetData(self.model, self.data)
+
+        # ---------- BALL POSITION & VELOCITY ----------
+        # Center-ish ball placement, with tiny random x so it's not always exactly on 0
+        x_qpos = self.ball_x_qpos_adr
+        y_qpos = self.ball_y_qpos_adr
+        x_qvel = self.ball_x_qvel_adr
+        y_qvel = self.ball_y_qvel_adr
+
+        # Slight lateral randomization in x, start around mid-table in y
+        self.data.qpos[x_qpos] = self.np_random.uniform(-5.0, 5.0)
+        self.data.qpos[y_qpos] = 0.0
+
+        # Give the ball an initial "serve" toward the protagonist's attacking direction (+y)
+        # (you can later randomize which side serves if you want)
+        forward_sign = 1.0  # protagonist attacks +y
+
+        vx = self.np_random.uniform(-0.5, 0.5)
+        vy = forward_sign * self.np_random.uniform(1.0, 2.0)
+
+        self.data.qvel[x_qvel] = vx
+        self.data.qvel[y_qvel] = vy
+
+        # Let MuJoCo recompute derived quantities
+        mujoco.mj_forward(self.model, self.data)
+
+        # ---------- BOOKKEEPING / COUNTERS ----------
         self.simulation_time = 0.0
-        ball_pos, _ = self._get_ball_obs()
-        self.prev_ball_y = ball_pos[1]
-        self.no_progress_steps = 0
-        self.ball_stopped_count = 0
         self._debug_step_counter = 0
 
-        self._direction_sign_for_protagonist = 1.0
-        self._last_ball_y = self.prev_ball_y
+        # For stagnation / progress tracking
+        ball_pos, _ = self._get_ball_obs()
+        _, ball_y = ball_pos
+        self.prev_ball_y = ball_y
+        self.no_progress_steps = 0
+        self.ball_stopped_count = 0
 
-        return self._get_obs(), {}
+        # Direction sign & last_ball_y for reward shaping
+        self._direction_sign_for_protagonist = forward_sign
+        self._last_ball_y = ball_y
+
+        if self.verbose_mode:
+            print("[RESET] ball_x={:.3f}, ball_y={:.3f}, vx={:.3f}, vy={:.3f}".format(
+                self.data.qpos[x_qpos],
+                self.data.qpos[y_qpos],
+                self.data.qvel[x_qvel],
+                self.data.qvel[y_qvel],
+            ))
+
+        # Return initial observation and empty info dict
+        return self._get_obs().astype(F32, copy=False), {}
 
 
 
@@ -725,33 +781,36 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
             print("[STEP DEBUG] AFTER first mj_step, ball_vel =", vel1)
 
         self.simulation_time += self.model.opt.timestep
-
         obs = self._get_obs().astype(F32)
-        reward =  float(self._compute_step_reward(protagonist_action))
+        reward = float(self._compute_step_reward(protagonist_action))
 
+        # Check termination AFTER physics update
         terminated = self.terminated
 
-        ball_pos_after = np.array(self._get_ball_obs()[0][:2], dtype=float)
-        delta = np.linalg.norm(ball_pos_after - ball_pos_before)
+        # Get ball position for logging / info
+        ball_pos, _ = self._get_ball_obs()
+        ball_x, ball_y = ball_pos
 
-        # if self._debug_step_counter < 20:
-            # print(
-            #     f"[DEBUG PHYSICS] step={self._debug_step_counter} "
-            #     f"ball_before={ball_pos_before} ball_after={ball_pos_after} Δ={delta}"
-            # )
+        # Ask the SAME goal function the termination uses
+        winning_goal, losing_goal = self._check_goal_scored(ball_pos)
+        goal_scored = bool(winning_goal or losing_goal)
 
-        try:
-            ball_pos, _ = self._get_ball_obs()
-            ball_x, ball_y = ball_pos
-        except Exception as e:
-            # print(f"[FoosballEnv DEBUG] _get_ball_obs() failed: {e}")
-            ball_x = ball_y = float("nan")
+        ball_stagnant = self.ball_stopped_count >= BALL_STOPPED_COUNT_THRESHOLD
+        max_episode_seconds = 10.0
+        over_max_time = self.simulation_time >= max_episode_seconds
 
         info = {
             "ball_x": float(ball_x),
             "ball_y": float(ball_y),
             "reward": float(reward),
+            "winning_goal": bool(winning_goal),
+            "losing_goal": bool(losing_goal),
+            "goal_scored": goal_scored,
+            "ball_stagnant": ball_stagnant,
+            "over_max_time": over_max_time,
         }
+
+
 
         self._last_ball_y = ball_y  # update after computing reward
         self._debug_step_counter += 1

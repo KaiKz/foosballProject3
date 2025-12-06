@@ -1,241 +1,265 @@
-#!/usr/bin/env mjpython
+#!/usr/bin/env python
 """
-FoosballEnv sanity rollouts with a MuJoCo viewer.
+Train SAC/TQC on FoosballEnv and plot:
+- goal rate per episode
+- mean return
+- episode length
 
-- Lifts black players as blockers.
-- Runs several random episodes, with a “kick” bias on yellow attack.
-- Shows everything in the MuJoCo viewer window.
+Device policy:
+- Try CUDA first
+- Then MPS
+- If neither is available, RAISE and exit (never use CPU)
 """
 
-import time
+import os
 import numpy as np
-import mujoco
-from mujoco import viewer
+import matplotlib.pyplot as plt
+
+import torch
+import gymnasium as gym
+from stable_baselines3 import SAC
+from sb3_contrib import TQC
+from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.callbacks import BaseCallback
 
 from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import FoosballEnv
 
 
-# -----------------------------------------------------------
-# Black-player lifting (same idea as before)
-# -----------------------------------------------------------
+# =========================================================
+# Device selection: CUDA -> MPS -> error
+# =========================================================
 
-# From your actuator mapping:
-# ctrl[8]  -> b_goal_linear
-# ctrl[9]  -> b_goal_rotation
-# ctrl[10] -> b_def_linear
-# ctrl[11] -> b_def_rotation
-# ctrl[12] -> b_mid_linear
-# ctrl[13] -> b_mid_rotation
-# ctrl[14] -> b_attack_linear
-# ctrl[15] -> b_attack_rotation
-BLACK_ROT_ACT_IDX = [9, 11, 13, 15]
-
-
-def _get_black_rot_qpos_indices(env):
+def get_training_device():
     """
-    Find qpos indices for the joints driven by black-rotation actuators.
-    Cache them on env as _black_rot_qpos_idx.
+    Choose device strictly in this order:
+    1) CUDA
+    2) MPS
+    If neither is available, raise an error (do NOT fall back to CPU).
     """
-    if hasattr(env, "_black_rot_qpos_idx"):
-        return env._black_rot_qpos_idx
+    if torch.cuda.is_available():
+        gpu_name = torch.cuda.get_device_name(0)
+        print(f"[DEVICE] Using CUDA GPU: {gpu_name}")
+        return "cuda"
 
-    model = env.model
-    qpos_idx_list = []
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        print("[DEVICE] Using Apple MPS backend")
+        return "mps"
 
-    print("[BLACK-LIFT] Resolving black rotation qpos indices...")
+    # Explicitly refuse to train on CPU
+    raise RuntimeError(
+        "[DEVICE ERROR] No CUDA or MPS device available. "
+        "Refusing to train on CPU. Make sure you are on a GPU machine with "
+        "CUDA (or MPS on macOS) properly configured."
+    )
 
-    for act_id in BLACK_ROT_ACT_IDX:
-        if act_id >= model.nu:
-            print(f"  [WARN] actuator index {act_id} >= nu={model.nu}, skipping")
-            continue
 
-        joint_id = int(model.actuator_trnid[act_id, 0])
-        if joint_id < 0:
-            print(
-                f"  [WARN] actuator {act_id} has no joint, "
-                f"trnid={model.actuator_trnid[act_id]}, skipping"
-            )
-            continue
+# =========================================================
+# Env factory
+# =========================================================
 
-        qpos_adr = int(model.jnt_qposadr[joint_id])
-        qpos_idx_list.append(qpos_adr)
-
-        try:
-            act_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_ACTUATOR, act_id)
-        except Exception:
-            act_name = f"act_{act_id}"
-
-        try:
-            joint_name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, joint_id)
-        except Exception:
-            joint_name = f"joint_{joint_id}"
-
-        print(
-            f"  [BLACK-LIFT] actuator {act_id} ({act_name}) "
-            f"-> joint {joint_id} ({joint_name}), qpos[{qpos_adr}]"
+def make_env(seed: int = 0):
+    """
+    Create a monitored FoosballEnv for SB3.
+    """
+    def _init():
+        env = FoosballEnv(
+            render_mode=None,       # no viewer during training
+            verbose_mode=False,
+            play_until_goal=False,  # use your termination logic
         )
+        env = Monitor(env)         # adds episode stats into info["episode"]
+        env.reset(seed=seed)
+        return env
+    return _init
 
-    env._black_rot_qpos_idx = qpos_idx_list
-    print("[BLACK-LIFT] qpos indices for black rotation joints:", qpos_idx_list)
-    return qpos_idx_list
 
+# =========================================================
+# Callback to collect per-episode stats
+# =========================================================
 
-def lift_black_players(env, angle_rad=np.deg2rad(90.0)):
+class EpisodeStatsCallback(BaseCallback):
     """
-    Rotate black players “up” so they aren't blocking the ball.
-    Call this right after reset.
+    Collect:
+      - episode return
+      - episode length
+      - goal_scored flag from env info
+    and keep them in lists so we can plot later.
     """
-    qpos_idx_list = _get_black_rot_qpos_indices(env)
-    if not qpos_idx_list:
-        print("[BLACK-LIFT] No black rotation joints found; skipping lift.")
-        return
 
-    for idx in qpos_idx_list:
-        env.data.qpos[idx] = angle_rad
-    mujoco.mj_forward(env.model, env.data)
+    def __init__(self, verbose: int = 1):
+        super().__init__(verbose)
+        self.episode_returns = []
+        self.episode_lengths = []
+        self.episode_goals = []
 
-    print("[BLACK-LIFT] Black players lifted by", angle_rad, "rad")
+    def _on_step(self) -> bool:
+        dones = self.locals.get("dones")
+        infos = self.locals.get("infos")
 
+        if dones is None or infos is None:
+            return True
 
-# -----------------------------------------------------------
-# Episode classification helpers
-# -----------------------------------------------------------
+        for done, info in zip(dones, infos):
+            if done:
+                ep_info = info.get("episode")
+                if ep_info is not None:
+                    self.episode_returns.append(float(ep_info["r"]))
+                    self.episode_lengths.append(int(ep_info["l"]))
+                    self.episode_goals.append(
+                        float(info.get("goal_scored", False))
+                    )
 
-def infer_termination_type(terminated, truncated, ep_return, info):
-    """
-    Heuristic label for why an episode ended.
-    Adjust thresholds/flags to match what your env puts in 'info'.
-    """
-    goal_flag = bool(info.get("goal_scored", False))
-    stagnant_flag = bool(info.get("ball_stagnant", False))
-    over_time_flag = bool(info.get("over_max_time", False))
-
-    # You showed rewards ~1000 for a successful goal; tweak if needed.
-    if goal_flag or ep_return > 200.0:
-        return "GOAL"
-    if stagnant_flag:
-        return "STAGNATION"
-    if truncated or over_time_flag:
-        return "TIMEOUT"
-    if terminated:
-        return "OTHER-TERMINATED"
-    return "UNKNOWN"
+        return True
 
 
-# -----------------------------------------------------------
-# Core rollout logic, optionally with viewer
-# -----------------------------------------------------------
+# =========================================================
+# Plot helpers
+# =========================================================
 
-def run_random_rollouts_with_viewer(
-    n_episodes=10,
-    max_steps_per_ep=300,
-    kick_steps=40,
-    sleep_scale=1.0,
+def moving_average(x: np.ndarray, window: int) -> np.ndarray:
+    if len(x) == 0:
+        return x
+    if len(x) < window:
+        return x.astype(np.float32)
+    kernel = np.ones(window, dtype=np.float32) / float(window)
+    return np.convolve(x, kernel, mode="valid")
+
+
+def plot_training_stats(cb: EpisodeStatsCallback,
+                        algo_name: str = "SAC",
+                        out_dir: str = "foosball_plots",
+                        window: int = 20):
+    os.makedirs(out_dir, exist_ok=True)
+
+    ep_returns = np.array(cb.episode_returns, dtype=np.float32)
+    ep_lengths = np.array(cb.episode_lengths, dtype=np.float32)
+    ep_goals   = np.array(cb.episode_goals, dtype=np.float32)
+
+    episodes = np.arange(1, len(ep_returns) + 1)
+
+    ret_ma   = moving_average(ep_returns, window)
+    len_ma   = moving_average(ep_lengths, window)
+    goal_ma  = moving_average(ep_goals, window)
+
+    if len(ep_returns) >= window:
+        ma_episodes = episodes[window - 1:]
+    else:
+        ma_episodes = episodes
+
+    # ---- Returns ----
+    plt.figure()
+    plt.plot(episodes, ep_returns, alpha=0.3, label="Episode return")
+    plt.plot(ma_episodes, ret_ma, linewidth=2.0, label=f"{window}-ep moving avg")
+    plt.xlabel("Episode")
+    plt.ylabel("Return")
+    plt.title(f"{algo_name} on FoosballEnv – Episode Return")
+    plt.legend()
+    plt.grid(True, linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, f"{algo_name.lower()}_returns.png"))
+    plt.close()
+
+    # ---- Episode length ----
+    plt.figure()
+    plt.plot(episodes, ep_lengths, alpha=0.3, label="Episode length")
+    plt.plot(ma_episodes, len_ma, linewidth=2.0, label=f"{window}-ep moving avg")
+    plt.xlabel("Episode")
+    plt.ylabel("Steps")
+    plt.title(f"{algo_name} on FoosballEnv – Episode Length")
+    plt.legend()
+    plt.grid(True, linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, f"{algo_name.lower()}_lengths.png"))
+    plt.close()
+
+    # ---- Goal rate ----
+    plt.figure()
+    plt.plot(episodes, ep_goals, "o", alpha=0.2, label="Goal (1) / no goal (0)")
+    plt.plot(ma_episodes, goal_ma, linewidth=2.0, label=f"{window}-ep goal rate")
+    plt.xlabel("Episode")
+    plt.ylabel("Goal rate")
+    plt.ylim(-0.05, 1.05)
+    plt.title(f"{algo_name} on FoosballEnv – Goal Rate")
+    plt.legend()
+    plt.grid(True, linestyle="--", alpha=0.3)
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, f"{algo_name.lower()}_goals.png"))
+    plt.close()
+
+    print(f"[PLOTS] Saved plots to: {out_dir}")
+
+
+# =========================================================
+# Main training routine
+# =========================================================
+
+def train(
+    algo: str = "sac",
+    total_timesteps: int = 200_000,
+    seed: int = 0,
 ):
     """
-    Run random episodes while streaming env.model/env.data into a MuJoCo viewer.
+    algo: "sac" or "tqc"
     """
-    # Note: we don't pass render_mode here; we're using raw MuJoCo viewer.
-    env = FoosballEnv(
-        render_mode=None,
+    # Decide device (CUDA -> MPS -> error if neither)
+    device = get_training_device()
+
+    vec_env = DummyVecEnv([make_env(seed=seed)])
+
+    if algo.lower() == "sac":
+        AlgoClass = SAC
+        algo_name = "SAC"
+    elif algo.lower() == "tqc":
+        AlgoClass = TQC
+        algo_name = "TQC"
+    else:
+        raise ValueError("algo must be 'sac' or 'tqc'")
+
+    callback = EpisodeStatsCallback(verbose=1)
+
+    print(f"[TRAIN] Starting {algo_name} training for {total_timesteps} timesteps on device={device}")
+
+    model = AlgoClass(
+        "MlpPolicy",
+        vec_env,
+        verbose=1,
+        device=device,  # <<< enforce GPU device here
+        tensorboard_log=os.path.join("tb_logs", "foosball_" + algo_name.lower()),
+        learning_rate=3e-4,
+        buffer_size=100_000,
+        batch_size=256,
+        gamma=0.99,
+        tau=0.01,
+        train_freq=1,
+        gradient_steps=1,
     )
 
-    model = env.model
-    data = env.data
-
-    ep_stats = []
-
-    # Open a single viewer for the whole run
-    with viewer.launch_passive(model, data) as v:
-        print("[VIEWER] Window opened. Running episodes...")
-
-        try:
-            for ep in range(n_episodes):
-                # Reset env
-                obs, info = env.reset(seed=42 + ep)
-                lift_black_players(env)  # keep black guys up after each reset
-
-                ep_return = 0.0
-                steps = 0
-                last_info = info
-                terminated = False
-                truncated = False
-
-                print(f"\n========== EPISODE {ep + 1}/{n_episodes} ==========")
-
-                for t in range(max_steps_per_ep):
-                    # base random action
-                    action = env.action_space.sample()
-
-                    # Add a “kick” motion on yellow attack rotation (ctrl[7])
-                    if t < kick_steps and action.shape[0] > 7:
-                        phase = 2.0 * np.pi * (t / max(kick_steps - 1, 1))
-                        kick = 0.9 * np.sin(phase)
-                        action[7] = np.clip(kick, -1.0, 1.0)
-
-                    obs, reward, terminated, truncated, info = env.step(action)
-
-                    ep_return += float(reward)
-                    steps += 1
-                    last_info = info
-
-                    # Update viewer
-                    if not v.is_running:
-                        print("[VIEWER] Window closed by user; stopping rollouts.")
-                        return
-                    v.sync()
-
-                    # Slow down a bit so you can see the motion
-                    dt = env.model.opt.timestep * getattr(env, "frame_skip", 1)
-                    time.sleep(dt * sleep_scale)
-
-                    if terminated or truncated:
-                        break
-
-                term_type = infer_termination_type(
-                    terminated=terminated,
-                    truncated=truncated,
-                    ep_return=ep_return,
-                    info=last_info,
-                )
-
-                ball_x = last_info.get("ball_x", None)
-                ball_y = last_info.get("ball_y", None)
-
-                print(
-                    f"Episode {ep + 1:02d} finished:\n"
-                    f"  steps:      {steps}\n"
-                    f"  return:     {ep_return:.3f}\n"
-                    f"  term_type:  {term_type}\n"
-                    f"  ball_xy:    ({ball_x}, {ball_y})\n"
-                    f"  terminated: {terminated}, truncated: {truncated}"
-                )
-
-                ep_stats.append((ep_return, steps, term_type))
-
-            print("\n[VIEWER] Episodes done. You can close the window now.")
-            time.sleep(2.0)
-
-        finally:
-            env.close()
-
-    # Console summary
-    print("\n================== OVERALL SUMMARY ==================")
-    from collections import Counter
-    counts = Counter(t for _, _, t in ep_stats)
-    for i, (ret, steps, ttype) in enumerate(ep_stats, start=1):
-        print(f"Ep {i:02d}: return={ret:8.3f}  steps={steps:3d}  type={ttype}")
-    print("Termination counts:", dict(counts))
-
-
-def main():
-    run_random_rollouts_with_viewer(
-        n_episodes=50,
-        max_steps_per_ep=100,
-        kick_steps=40,
-        sleep_scale=1.0,  # >1.0 = slower, <1.0 = faster
+    model.learn(
+        total_timesteps=total_timesteps,
+        callback=callback,
+        progress_bar=True,
     )
+
+    save_path = f"foosball_{algo_name.lower()}_model"
+    model.save(save_path)
+    print(f"[TRAIN] Saved {algo_name} model to {save_path}.zip")
+
+    plot_training_stats(callback, algo_name=algo_name)
+
+    return model, callback
 
 
 if __name__ == "__main__":
-    main()
+    # Example: SAC only. You can uncomment TQC run below if you want both.
+    model_sac, cb_sac = train(
+        algo="sac",
+        total_timesteps=100_000,
+        seed=0,
+    )
+
+    # model_tqc, cb_tqc = train(
+    #     algo="tqc",
+    #     total_timesteps=100_000,
+    #     seed=1,
+    # )
