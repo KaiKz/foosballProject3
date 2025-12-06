@@ -1,17 +1,15 @@
 #!/usr/bin/env python
 """
-Train SAC and then TQC on FoosballEnv:
+Sweep over reward parameters for SAC on FoosballEnv.
 
-1) Train SAC as protagonist vs passive-lifted black (no antagonist_model).
-2) Train TQC as protagonist vs frozen SAC antagonist.
+For each RewardWeights config:
+  - Train SAC vs passive-lifted black (no antagonist_model).
+  - Collect episode returns.
+  - Compute a simple score (mean return over last K episodes).
+  - Plot all curves together for visual comparison.
+  - Print a ranked summary of configs by score.
 
-For both:
-- Use multi-env training.
-- Log episode returns, lengths, and goal rate.
-- Save plots to foosball_plots/.
-- Save models as:
-    foosball_sac_nenv<N>_model.zip
-    foosball_tqc_nenv<N>_model.zip
+This script does *not* do the big fixed-parameter SAC+TQC training anymore.
 """
 
 import os
@@ -25,12 +23,15 @@ import matplotlib.pyplot as plt
 import torch
 import gymnasium as gym
 from stable_baselines3 import SAC
-from sb3_contrib import TQC
+from sb3_contrib import TQC  # (unused now, but you can keep or remove)
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
-from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import RewardWeights
 
+from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import (
+    FoosballEnv,
+    RewardWeights,
+)
 
 # =========================================================
 # Device selection: CUDA -> MPS -> error
@@ -64,7 +65,9 @@ def get_training_device():
 # Env factory (supports multi-env + optional antagonist)
 # =========================================================
 
-def make_env(seed: int = 0, antagonist_model=None, reward_weights: RewardWeights | None = None):
+def make_env(seed: int = 0,
+             antagonist_model=None,
+             reward_weights: RewardWeights | None = None):
     def _init():
         env = FoosballEnv(
             antagonist_model=antagonist_model,
@@ -82,8 +85,6 @@ def make_env(seed: int = 0, antagonist_model=None, reward_weights: RewardWeights
 # =========================================================
 # Callback to collect per-episode stats
 # =========================================================
-
-
 
 class EpisodeStatsCallback(BaseCallback):
     """
@@ -162,7 +163,6 @@ class EpisodeStatsCallback(BaseCallback):
         return True
 
 
-
 # =========================================================
 # Plot helpers
 # =========================================================
@@ -239,6 +239,7 @@ def plot_training_stats(cb: EpisodeStatsCallback,
 
     print(f"[PLOTS] Saved plots to: {out_dir}")
 
+
 def plot_reward_sweep_comparison(callbacks, labels,
                                  out_dir: str = "foosball_plots",
                                  window: int = 50):
@@ -293,15 +294,18 @@ def train(
 
     if antagonist_model is None:
         vec_env = SubprocVecEnv(
-            [make_env(seed=seed + i, antagonist_model=None, reward_weights=reward_weights)
+            [make_env(seed=seed + i,
+                      antagonist_model=None,
+                      reward_weights=reward_weights)
              for i in range(n_envs)]
         )
     else:
         vec_env = DummyVecEnv(
-            [make_env(seed=seed + i, antagonist_model=antagonist_model, reward_weights=reward_weights)
+            [make_env(seed=seed + i,
+                      antagonist_model=antagonist_model,
+                      reward_weights=reward_weights)
              for i in range(n_envs)]
         )
-
 
     if algo.lower() == "sac":
         AlgoClass = SAC
@@ -323,7 +327,8 @@ def train(
     print(
         f"[TRAIN] Starting {algo_name} training for {total_timesteps} timesteps "
         f"on device={device} with n_envs={n_envs}, "
-        f"antagonist={'None' if antagonist_model is None else 'provided'}"
+        f"antagonist={'None' if antagonist_model is None else 'provided'}, "
+        f"reward_weights={reward_weights}"
     )
     tb_name = run_name or f"{algo_name}_nenv{n_envs}"
     model = AlgoClass(
@@ -341,8 +346,6 @@ def train(
         gradient_steps=32,
     )
 
-
-
     model.learn(
         total_timesteps=total_timesteps,
         callback=callback,
@@ -354,20 +357,24 @@ def train(
     model.save(save_path)
     print(f"[TRAIN] Saved {algo_name} model to {save_path}.zip")
 
+    # still save per-config plots if you want
     plot_training_stats(callback, algo_name=algo_name)
 
     return model, callback
 
 
-
+# =========================================================
+# Reward sweep (this is the only thing run in __main__)
+# =========================================================
 
 def run_simple_reward_search():
     """
-    Step 3: Simple automatic search over reward parameters.
+    Automatic search over reward parameters.
 
     Trains SAC several times with different RewardWeights, collects
-    callbacks, and then makes a comparison plot using
-    plot_reward_sweep_comparison(...).
+    callbacks, and then:
+      - makes a comparison plot using plot_reward_sweep_comparison(...)
+      - prints a ranked list of configs by score
     """
     # You can tweak these configs; keep it small so it actually finishes.
     reward_configs = [
@@ -396,6 +403,7 @@ def run_simple_reward_search():
 
     callbacks = []
     labels = []
+    scores = []
 
     for i, rw in enumerate(reward_configs):
         label = f"SAC_rw{i}_p{rw.progress_w}_d{rw.distance_w}"
@@ -414,42 +422,34 @@ def run_simple_reward_search():
         callbacks.append(cb)
         labels.append(label)
 
-    # Step 4 (part 1): comparison chart for the reward search
+        # simple score: mean of last 100 episode returns
+        if len(cb.episode_returns) > 0:
+            K = min(100, len(cb.episode_returns))
+            score = float(np.mean(cb.episode_returns[-K:]))
+        else:
+            score = -np.inf
+        scores.append(score)
+        print(f"[SWEEP] Config {label} score (last {K} eps mean) = {score:.2f}")
+
+    # Comparison chart (all configs on one plot)
     plot_reward_sweep_comparison(callbacks, labels)
+
+    # Rank configs by score
+    ranking = sorted(
+        zip(labels, reward_configs, scores),
+        key=lambda t: t[2],
+        reverse=True,
+    )
+
+    print("\n========== REWARD SWEEP RANKING (best first) ==========")
+    for rank, (label, rw, score) in enumerate(ranking, start=1):
+        print(
+            f"{rank:2d}. {label}: score={score:.2f}, "
+            f"progress_w={rw.progress_w}, distance_w={rw.distance_w}, "
+            f"speed_w={rw.speed_w}, time_penalty={rw.time_penalty}"
+        )
 
 
 if __name__ == "__main__":
-    # ------------------- PHASE 1: Train SAC vs passive-lifted black -------------------
-    TRAIN_SAC = True
-    DO_REWARD_SWEEP = True   # <- flip to True when you want step 3
-
-    if TRAIN_SAC:
-        sac_model, sac_cb = train(
-            algo="sac",
-            total_timesteps=800_000,
-            seed=0,
-            n_envs=8,
-            antagonist_model=None,
-        )
-    else:
-        from stable_baselines3 import SAC
-        device = get_training_device()
-        sac_model = SAC.load("foosball_sac_nenv8_model.zip", device=device)
-        sac_cb = None
-
-    # ------------------- PHASE 2: Train TQC vs frozen SAC antagonist ------------------
-    tqc_model, tqc_cb = train(
-        algo="tqc",
-        total_timesteps=800_000,
-        seed=1,
-        n_envs=8,
-        antagonist_model=sac_model,
-    )
-
-    print("[DONE] SAC and TQC training complete.")
-
-    # ------------------- PHASE 3: Simple reward sweep (optional) ----------------------
-    if DO_REWARD_SWEEP:
-        run_simple_reward_search()
-
-
+    # This script now ONLY runs the reward-parameter sweep.
+    run_simple_reward_search()

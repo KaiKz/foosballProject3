@@ -45,17 +45,32 @@ INF32 = np.finfo(np.float32).max
 
 RODS = ["_goal_", "_def_", "_mid_", "_attack_"]
 
+from dataclasses import dataclass
+
+@dataclass
+class RewardWeights:
+    progress_w: float = 2.0
+    distance_w: float = 0.5
+    speed_w: float = 0.01
+    control_cost_w: float = 0.001
+    time_penalty: float = -0.1
+
+    virtual_goal_frac: float = 0.5   # like REWARD_GOAL_Y_FRACTION
+    goal_reward: float = 10000.0
+    own_goal_penalty: float = -10000.0
+
 
 class FoosballEnv(MujocoTableRenderMixin, gym.Env):
     metadata = {"render.modes": ["human", "rgb_array"]}
 
     def __init__(self, antagonist_model=None, play_until_goal=False,
-                 verbose_mode=False, debug_free_ball=False, render_mode="human"):
+                 verbose_mode=False, debug_free_ball=False, render_mode="human",
+                 reward_weights: RewardWeights | None = None):
         super(FoosballEnv, self).__init__()
         self.render_mode = render_mode
         self.viewer = None
         self._offscreen = None 
-
+        self.reward_weights = reward_weights or RewardWeights()     
         xml_file = SIM_PATH
         print("[FoosballEnv] Loading XML from:", xml_file)
 
@@ -1301,35 +1316,37 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
     #     reward = loss + victory + inverse_distance_to_goal + ctrl_cost
 
     def _compute_step_reward(self, protagonist_action):
+        rw = self.reward_weights
+
         ball_pos, ball_vel = self._get_ball_obs()
         ball_x, ball_y = ball_pos
 
         forward_sign = self._direction_sign_for_protagonist  # +1 or -1
 
-        # 1) Progress along scoring direction (but keep it modest)
+        # 1) Progress along scoring direction
         actual_delta_y = forward_sign * (ball_y - self._last_ball_y)
         extra_delta_y = max(actual_delta_y, 0.0)
-        progress_reward = 2.0 * extra_delta_y   # was 50.0 -> soften
+        progress_reward = rw.progress_w * extra_delta_y
 
         # 2) Distance-based shaping toward a *virtual* closer goal
-        virtual_goal_y = forward_sign * (REWARD_GOAL_Y_FRACTION * GOAL_LINE_Y)
+        virtual_goal_y = forward_sign * (rw.virtual_goal_frac * GOAL_LINE_Y)
         dist = abs(virtual_goal_y - ball_y)
-        distance_reward = 0.5 / (1.0 + dist)     # smaller than before
+        distance_reward = rw.distance_w / (1.0 + dist)
 
-        # 3) Penalize large actions slightly
-        control_cost = 0.001 * float(np.sum(np.square(protagonist_action)))
+        # 3) Penalize large actions
+        control_cost = rw.control_cost_w * float(np.sum(np.square(protagonist_action)))
 
         # 4) True goal or own-goal?
         winning_goal, losing_goal = self._check_goal_scored(ball_pos)
-        victory_reward = GOAL_REWARD if winning_goal else 0.0
-        own_goal_penalty = OWN_GOAL_PENALTY if losing_goal else 0.0
+        victory_reward   = rw.goal_reward if winning_goal else 0.0
+        own_goal_penalty = rw.own_goal_penalty if losing_goal else 0.0
 
-        # 5) Small reward for keeping ball moving (but not huge)
+        # 5) Small reward for keeping ball moving
         speed = np.linalg.norm(ball_vel)
-        speed_reward = 0.01 * speed
+        speed_reward = rw.speed_w * speed
 
-        # 6) Time penalty – every step costs something
-        time_penalty = -0.1   # tune this; magnitude matters a lot
+        # 6) Time penalty per step
+        time_penalty = rw.time_penalty
 
         reward = (
             progress_reward
@@ -1341,6 +1358,7 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
             + time_penalty
         )
         return reward
+
 
 
 

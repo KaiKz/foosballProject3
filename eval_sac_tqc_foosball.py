@@ -21,6 +21,8 @@ matplotlib.use("Agg")           # non-interactive backend, safe on servers
 import matplotlib.pyplot as plt
 # import times
 from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import FoosballEnv
+import csv
+import numpy as np
 
 
 # ---------------------------------------------------------------------
@@ -30,6 +32,24 @@ from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import Foosbal
 # Safety cap so an episode can never run forever during evaluation.
 MAX_STEPS_PER_EPISODE = 3000   # adjust if you want shorter/longer eval episodes
 render=False,
+
+
+class RandomPolicy:
+    """
+    Simple baseline: ignores observations and samples uniformly
+    from the env's action_space.
+    """
+    def __init__(self):
+        # Create a temporary env just to grab the correct action_space
+        tmp_env = make_eval_env(antagonist_model=None, render_mode=None)
+        self.action_space = tmp_env.action_space
+        tmp_env.close()
+
+    def predict(self, obs, deterministic=True):
+        # SB3-like API: returns (action, state)
+        action = self.action_space.sample()
+        return action, None
+
 
 def get_eval_device():
     """
@@ -266,25 +286,28 @@ def evaluate_head_to_head(
 
 
 def _summarize_eval_dict(d):
-    import numpy as np
-
     returns = np.array(d.get("returns", []), dtype=float)
-    lengths = np.array(d.get("episode_lengths", []), dtype=float)
+    steps   = np.array(d.get("steps", []), dtype=float)
+    goals   = np.array(d.get("goals", []), dtype=float)
 
-    goals_raw = d.get("goals", [])
-    # goals_raw might be a list of bools / 0-1 or a scalar
-    if isinstance(goals_raw, list):
-        total_goals = float(sum(goals_raw))
-    else:
-        total_goals = float(goals_raw)
+    n_episodes = len(returns)
+
+    # For SAC vs passive and TQC vs passive, there are no wins/losses.
+    wins   = float(d.get("wins", 0))
+    losses = float(d.get("losses", 0))
 
     summary = {
-        "num_episodes": len(returns),
-        "avg_return": float(returns.mean()) if len(returns) > 0 else 0.0,
-        "avg_length": float(lengths.mean()) if len(lengths) > 0 else 0.0,
-        "total_goals": total_goals,
+        "label": d.get("label", ""),
+        "episodes": int(n_episodes),
+        "mean_return": float(returns.mean()) if n_episodes > 0 else 0.0,
+        "std_return": float(returns.std()) if n_episodes > 0 else 0.0,
+        "mean_steps": float(steps.mean()) if n_episodes > 0 else 0.0,
+        "win_rate": wins / n_episodes if (n_episodes > 0 and "wins" in d) else 0.0,
+        "loss_rate": losses / n_episodes if (n_episodes > 0 and "losses" in d) else 0.0,
+        "goal_rate": float(goals.mean()) if n_episodes > 0 else 0.0,
     }
     return summary
+
 
 
 
@@ -393,53 +416,70 @@ def save_eval_summary_and_plots(
 if __name__ == "__main__":
     device = get_eval_device()
 
-    # Load trained models (paths match your training script)
+    # 0) Random baseline
+    random_policy = RandomPolicy()
+    random_vs_passive = evaluate_model_vs_passive(
+        random_policy,
+        "Random policy vs passive black",
+        n_episodes=50,
+        render=False,   # don't render for baseline
+    )
+
+    # Print quick stats for the baseline
+    import numpy as np
+    random_goal_rate = float(np.mean(random_vs_passive["goals"]))
+    random_mean_return = float(np.mean(random_vs_passive["returns"]))
+    print("\n[BASELINE] Random vs passive:")
+    print(f"  goal_rate = {random_goal_rate:.3f}")
+    print(f"  mean_return = {random_mean_return:.1f}\n")
+
+    # 1) Load trained models
     sac_model = SAC.load("foosball_sac_nenv8_model.zip", device=device)
     tqc_model = TQC.load("foosball_tqc_nenv8_model.zip", device=device)
 
     try:
-        # ---------- 1) Each vs passive black (metrics only, no render) ----------
+        # 2) SAC vs passive (no render – faster, and avoids viewer issues)
         sac_vs_passive = evaluate_model_vs_passive(
             sac_model,
             "SAC (yellow) vs passive black",
             n_episodes=50,
-            render=True,
+            render=False,
         )
+
+        # 3) TQC vs passive
         tqc_vs_passive = evaluate_model_vs_passive(
             tqc_model,
             "TQC (black) vs passive black",
             n_episodes=50,
-            render=True,
+            render=False,
         )
 
-        # ---------- 2) Head-to-head: SAC (yellow) vs TQC (black) ----------
+        # 4) SAC vs TQC head-to-head (also no render for big batch)
         sac_vs_tqc = evaluate_head_to_head(
             protagonist_model=sac_model,   # yellow
             antagonist_model=tqc_model,    # black
             label="SAC (yellow) vs TQC (black)",
             n_episodes=50,
-            render=True,                  # set True if you want to *watch*, but slower
+            render=False,
         )
-
-        # ---------- 3) Save CSV + PNG plots ----------
+        
+                # 4) Comparison charts + CSV for discussion
         save_eval_summary_and_plots(
-            sac_vs_passive,
-            tqc_vs_passive,
-            sac_vs_tqc,
+            sac_vs_passive=sac_vs_passive,
+            tqc_vs_passive=tqc_vs_passive,
+            sac_vs_tqc=sac_vs_tqc,
             out_dir="foosball_plots",
         )
 
-        print("[EVAL] Done. Check 'foosball_plots/' for PNGs and CSV.")
 
-        # OPTIONAL: run a tiny visual demo just to watch:
+        # 5) (Optional) small visual demo *afterwards* so viewer doesn’t explode
         evaluate_head_to_head(
             protagonist_model=sac_model,
             antagonist_model=tqc_model,
             label="SAC (yellow) vs TQC (black) [visual demo]",
-            n_episodes=5,
+            n_episodes=3,
             render=True,
         )
 
     except KeyboardInterrupt:
         print("\n[INTERRUPTED] Evaluation stopped by user.", flush=True)
-
