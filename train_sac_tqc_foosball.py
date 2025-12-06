@@ -16,6 +16,10 @@ For both:
 
 import os
 import numpy as np
+
+# --- IMPORTANT: use non-Tk backend to avoid Tcl_AsyncDelete crashes ---
+import matplotlib
+matplotlib.use("Agg")          # must come BEFORE importing pyplot
 import matplotlib.pyplot as plt
 
 import torch
@@ -283,24 +287,32 @@ def train(
 
     return model, callback
 
-
 if __name__ == "__main__":
     # ------------------- PHASE 1: Train SAC vs passive-lifted black -------------------
-    sac_model, sac_cb = train(
-        algo="sac",
-        total_timesteps=200_000,
-        seed=0,
-        n_envs=8,
-        antagonist_model=None,   # black is lifted via FoosballEnv.step()
-    )
+    TRAIN_SAC = False  # set to True if you want to retrain SAC
+
+    if TRAIN_SAC:
+        sac_model, sac_cb = train(
+            algo="sac",
+            total_timesteps=200_000,
+            seed=0,
+            n_envs=8,
+            antagonist_model=None,
+        )
+    else:
+        from stable_baselines3 import SAC
+        device = get_training_device()
+        sac_model = SAC.load("foosball_sac_nenv8_model.zip", device=device)
+        sac_cb = None  # not used later
 
     # ------------------- PHASE 2: Train TQC vs frozen SAC antagonist ------------------
     tqc_model, tqc_cb = train(
         algo="tqc",
-        total_timesteps=200_000,   # adjust if this is too slow
+        total_timesteps=200_000,
         seed=1,
         n_envs=8,
-        antagonist_model=sac_model,  # SAC controls black rods, frozen
+        antagonist_model=sac_model,
     )
 
     print("[DONE] SAC and TQC training complete.")
+

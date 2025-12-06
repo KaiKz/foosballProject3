@@ -17,7 +17,12 @@ Device policy:
 
 import os
 import numpy as np
+
+# --- IMPORTANT: use non-Tk backend to avoid Tcl_AsyncDelete crashes ---
+import matplotlib
+matplotlib.use("Agg")          # must come BEFORE importing pyplot
 import matplotlib.pyplot as plt
+
 
 import torch
 import gymnasium as gym
