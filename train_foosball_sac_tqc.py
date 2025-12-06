@@ -219,7 +219,7 @@ def train(
     callback = EpisodeStatsCallback(verbose=1)
 
     print(f"[TRAIN] Starting {algo_name} training for {total_timesteps} timesteps on device={device}")
-
+    log_dir="logs_tensorboard"
     model = AlgoClass(
         "MlpPolicy",
         vec_env,
@@ -232,6 +232,7 @@ def train(
         gamma=0.99,
         tau=0.01,
         train_freq=1,
+        tensorboard_log=log_dir, 
         gradient_steps=1,
     )
 
@@ -254,7 +255,8 @@ if __name__ == "__main__":
     # Example: SAC only. You can uncomment TQC run below if you want both.
     model_sac, cb_sac = train(
         algo="sac",
-        total_timesteps=100_000,
+        total_timesteps=2_000_000,
+        tb_log_name="SAC_foosball_run1",
         seed=0,
     )
 
@@ -263,3 +265,4 @@ if __name__ == "__main__":
     #     total_timesteps=100_000,
     #     seed=1,
     # )
+
