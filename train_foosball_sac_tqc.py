@@ -74,7 +74,7 @@ def make_env(seed: int = 0):
         env = FoosballEnv(
             render_mode=None,       # no viewer during training
             verbose_mode=False,     # IMPORTANT: keep False for speed
-            play_until_goal=False,  # use termination logic in env
+            play_until_goal=True,  # use termination logic in env
         )
         env = Monitor(env)
         env.reset(seed=seed)

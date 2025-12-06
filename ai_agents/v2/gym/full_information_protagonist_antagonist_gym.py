@@ -19,8 +19,8 @@ TABLE_MAX_Y_DIM = GOAL_LINE_Y   # keep this for legacy uses
 REWARD_GOAL_Y_FRACTION = 0.5    # half-way to the real goal, tweak as you like
 
 # Big terminal rewards
-GOAL_REWARD = 1000.0
-OWN_GOAL_PENALTY = -1000.0
+GOAL_REWARD = 10000.0
+OWN_GOAL_PENALTY = -10000.0
 
 MAX_STEPS = 40  # if you still use this elsewhere
 
@@ -1271,12 +1271,12 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
         # 1) Progress along scoring direction (but keep it modest)
         actual_delta_y = forward_sign * (ball_y - self._last_ball_y)
         extra_delta_y = max(actual_delta_y, 0.0)
-        progress_reward = 10.0 * extra_delta_y   # was 50.0 -> soften
+        progress_reward = 2.0 * extra_delta_y   # was 50.0 -> soften
 
         # 2) Distance-based shaping toward a *virtual* closer goal
         virtual_goal_y = forward_sign * (REWARD_GOAL_Y_FRACTION * GOAL_LINE_Y)
         dist = abs(virtual_goal_y - ball_y)
-        distance_reward = 2.0 / (1.0 + dist)     # smaller than before
+        distance_reward = 0.5 / (1.0 + dist)     # smaller than before
 
         # 3) Penalize large actions slightly
         control_cost = 0.001 * float(np.sum(np.square(protagonist_action)))
@@ -1288,10 +1288,10 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
 
         # 5) Small reward for keeping ball moving (but not huge)
         speed = np.linalg.norm(ball_vel)
-        speed_reward = 0.05 * speed
+        speed_reward = 0.01 * speed
 
         # 6) Time penalty – every step costs something
-        time_penalty = -0.5   # tune this; magnitude matters a lot
+        time_penalty = -0.1   # tune this; magnitude matters a lot
 
         reward = (
             progress_reward
