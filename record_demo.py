@@ -94,13 +94,13 @@ def run_and_record(
         print("[CAMERA DEBUG] No cameras defined in XML; using custom top-down camera.")
 
     # === BALL VISIBILITY SETTINGS ===
-    ball_geom_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_GEOM, "ball_visual")
+    ball_geom_id = mujoco.mj_name2id(env.model, mujoco.mjtObj.mjOBJ_GEOM, "ball")
     # print("[DEBUG] ball geom id:", ball_geom_id)
     print("[DEBUG] ball size before:", env.model.geom_size[ball_geom_id])
     print("[DEBUG] ball rgba before:", env.model.geom_rgba[ball_geom_id])
 
     # Make ball clearly visible but not ridiculous
-    # env.model.geom_size[ball_geom_id][0] = 1.5  # radius (was 0.02)
+    env.model.geom_size[ball_geom_id][0] = 5  # radius (was 0.02)
     env.model.geom_rgba[ball_geom_id] = np.array(
         [1.0, 0.0, 1.0, 1.0], dtype=np.float32
     )  # bright magenta
