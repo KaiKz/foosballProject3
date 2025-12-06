@@ -766,19 +766,19 @@ class FoosballEnv(MujocoTableRenderMixin, gym.Env):
         #     + self.antagonist_action_size
         # ] = antagonist_action
 
-        if self.verbose_mode and self._debug_step_counter < 50:
-            self._debug_ball_forces()
-            self._debug_ball_pos()  
-            # self._debug_ball_forces_2d()
-            self._debug_ball_contacts()
+        # if self.verbose_mode and self._debug_step_counter < 50:
+        #     self._debug_ball_forces()
+        #     self._debug_ball_pos()  
+        #     # self._debug_ball_forces_2d()
+        #     self._debug_ball_contacts()
 
-        if self.verbose_mode and self._debug_step_counter == 0:
-            pos1, vel1 = self._get_ball_obs()
-            print("[STEP DEBUG] AFTER first mj_step, ball_vel =", vel1)
+        # if self.verbose_mode and self._debug_step_counter == 0:
+        #     pos1, vel1 = self._get_ball_obs()
+        #     print("[STEP DEBUG] AFTER first mj_step, ball_vel =", vel1)
 
-        if self._debug_step_counter == 0:
-            _, vel1 = self._get_ball_obs()
-            print("[STEP DEBUG] AFTER first mj_step, ball_vel =", vel1)
+        # if self._debug_step_counter == 0:
+        #     _, vel1 = self._get_ball_obs()
+        #     print("[STEP DEBUG] AFTER first mj_step, ball_vel =", vel1)
 
         self.simulation_time += self.model.opt.timestep
         obs = self._get_obs().astype(F32)

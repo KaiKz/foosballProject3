@@ -5,6 +5,10 @@ Train SAC/TQC on FoosballEnv and plot:
 - mean return
 - episode length
 
+Improvements:
+- Multi-env training with SubprocVecEnv (n_envs >= 1)
+- More gradient steps per env step to better utilize GPU
+
 Device policy:
 - Try CUDA first
 - Then MPS
@@ -20,7 +24,7 @@ import gymnasium as gym
 from stable_baselines3 import SAC
 from sb3_contrib import TQC
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
 
 from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import FoosballEnv
@@ -55,22 +59,27 @@ def get_training_device():
 
 
 # =========================================================
-# Env factory
+# Env factory (supports multi-env)
 # =========================================================
 
 def make_env(seed: int = 0):
     """
     Create a monitored FoosballEnv for SB3.
+
+    NOTE: This is wrapped in a function so it can be used
+    both in DummyVecEnv and SubprocVecEnv.
     """
+
     def _init():
         env = FoosballEnv(
             render_mode=None,       # no viewer during training
-            verbose_mode=False,
-            play_until_goal=False,  # use your termination logic
+            verbose_mode=False,     # IMPORTANT: keep False for speed
+            play_until_goal=False,  # use termination logic in env
         )
-        env = Monitor(env)         # adds episode stats into info["episode"]
+        env = Monitor(env)
         env.reset(seed=seed)
         return env
+
     return _init
 
 
@@ -191,21 +200,30 @@ def plot_training_stats(cb: EpisodeStatsCallback,
 
 
 # =========================================================
-# Main training routine
+# Main training routine (multi-env + heavier gradients)
 # =========================================================
 
 def train(
     algo: str = "sac",
-    total_timesteps: int = 200_000,
+    total_timesteps: int = 2_000_000,
     seed: int = 0,
+    n_envs: int = 8,          # <--- multi-env
 ):
     """
     algo: "sac" or "tqc"
+    total_timesteps: counted across all envs (SB3 convention).
+    n_envs: number of parallel envs (SubprocVecEnv).
     """
+
     # Decide device (CUDA -> MPS -> error if neither)
     device = get_training_device()
 
-    vec_env = DummyVecEnv([make_env(seed=seed)])
+    # Multi-env: SubprocVecEnv for true parallelism.
+    # If you ever hit pickling issues, switch to DummyVecEnv.
+    vec_env = SubprocVecEnv(
+        [make_env(seed=seed + i) for i in range(n_envs)]
+    )
+    # vec_env = DummyVecEnv([make_env(seed=seed + i) for i in range(n_envs)])
 
     if algo.lower() == "sac":
         AlgoClass = SAC
@@ -218,31 +236,36 @@ def train(
 
     callback = EpisodeStatsCallback(verbose=1)
 
-    print(f"[TRAIN] Starting {algo_name} training for {total_timesteps} timesteps on device={device}")
-    log_dir="logs_tensorboard"
+    log_dir = os.path.join("tb_logs", f"foosball_{algo_name.lower()}_nenv{n_envs}")
+    os.makedirs(log_dir, exist_ok=True)
+
+    print(
+        f"[TRAIN] Starting {algo_name} training for {total_timesteps} timesteps "
+        f"on device={device} with n_envs={n_envs}"
+    )
+
     model = AlgoClass(
         "MlpPolicy",
         vec_env,
         verbose=1,
-        device=device,  # <<< enforce GPU device here
-        tensorboard_log=os.path.join("tb_logs", "foosball_" + algo_name.lower()),
+        device=device,                      # enforce GPU device
+        tensorboard_log=log_dir,
         learning_rate=3e-4,
-        buffer_size=100_000,
-        batch_size=512,
+        buffer_size=200_000,               # larger replay buffer
+        batch_size=1024,                   # larger batches -> more GPU work
         gamma=0.99,
         tau=0.01,
-        train_freq=1,
-        tensorboard_log=log_dir, 
-        gradient_steps=1,
+        train_freq=1,                      # 1 step per env => n_envs transitions
+        gradient_steps=4,                  # more gradient updates per collection
     )
 
     model.learn(
         total_timesteps=total_timesteps,
         callback=callback,
-        progress_bar=True,
+        progress_bar=True,                # disable for tiny speedup
     )
 
-    save_path = f"foosball_{algo_name.lower()}_model"
+    save_path = f"foosball_{algo_name.lower()}_nenv{n_envs}_model"
     model.save(save_path)
     print(f"[TRAIN] Saved {algo_name} model to {save_path}.zip")
 
@@ -252,17 +275,18 @@ def train(
 
 
 if __name__ == "__main__":
-    # Example: SAC only. You can uncomment TQC run below if you want both.
+    # Example: SAC with multi-env + heavier GPU usage.
     model_sac, cb_sac = train(
         algo="sac",
         total_timesteps=2_000_000,
-        tb_log_name="SAC_foosball_run1",
         seed=0,
+        n_envs=8,      # adjust based on CPU cores; try 4–16
     )
 
+    # If you also want to run TQC, uncomment:
     # model_tqc, cb_tqc = train(
     #     algo="tqc",
-    #     total_timesteps=100_000,
+    #     total_timesteps=1_000_000,
     #     seed=1,
+    #     n_envs=8,
     # )
-
