@@ -267,7 +267,7 @@ def main():
     parser.add_argument(
         "--sleep-scale",
         type=float,
-        default=1.0,
+        default=10.0,
         help=">1.0 slower, <1.0 faster, 0.0 = as fast as possible",
     )
 
