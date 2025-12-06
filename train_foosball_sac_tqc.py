@@ -83,6 +83,8 @@ def make_env(seed: int = 0):
     return _init
 
 
+
+
 # =========================================================
 # Callback to collect per-episode stats
 # =========================================================
@@ -278,7 +280,7 @@ if __name__ == "__main__":
     # Example: SAC with multi-env + heavier GPU usage.
     model_sac, cb_sac = train(
         algo="sac",
-        total_timesteps=2_000_000,
+        total_timesteps=200_000,
         seed=0,
         n_envs=8,      # adjust based on CPU cores; try 4–16
     )
