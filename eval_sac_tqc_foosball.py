@@ -15,6 +15,9 @@ import numpy as np
 import torch
 from stable_baselines3 import SAC
 from sb3_contrib import TQC
+import matplotlib
+matplotlib.use("Agg")           # non-interactive backend, safe on servers
+import matplotlib.pyplot as plt
 
 from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import FoosballEnv
 
@@ -64,7 +67,7 @@ def make_eval_env(antagonist_model=None, render_mode=None):
         antagonist_model=antagonist_model,
         render_mode=render_mode,
         verbose_mode=False,
-        play_until_goal=True,
+        play_until_goal=False,
     )
     return env
 
@@ -81,12 +84,18 @@ def evaluate_model_vs_passive(
 ):
     """
     Evaluate a single model (yellow/protagonist) vs passive black (no antagonist model).
+
+    Returns a dict with raw per-episode stats so we can plot / log later.
     """
 
     env = make_eval_env(
         antagonist_model=None,   # passive black (same as your SAC training setup)
         render_mode="human" if render else None,
     )
+
+    ep_returns = []
+    ep_steps = []
+    ep_goals = []
 
     for ep_idx in range(n_episodes):
         print(f"[{label}] Starting episode {ep_idx + 1}/{n_episodes}...", flush=True)
@@ -129,7 +138,20 @@ def evaluate_model_vs_passive(
             flush=True,
         )
 
+        ep_returns.append(ep_return)
+        ep_steps.append(step_count)
+        ep_goals.append(1.0 if goal_scored else 0.0)
+
     env.close()
+
+    stats = {
+        "label": label,
+        "returns": ep_returns,
+        "steps": ep_steps,
+        "goals": ep_goals,
+    }
+    return stats
+
 
 
 # ---------------------------------------------------------------------
@@ -146,6 +168,8 @@ def evaluate_head_to_head(
     """
     Evaluate protagonist_model (yellow) vs antagonist_model (black).
     Uses same FoosballEnv as training, but with antagonist_model plugged in.
+
+    Returns a dict of per-episode stats + win/loss counts.
     """
 
     env = make_eval_env(
@@ -158,6 +182,9 @@ def evaluate_head_to_head(
     goals = 0
     total_return = 0.0
     total_steps = 0
+
+    ep_returns = []
+    ep_steps = []
 
     for ep_idx in range(n_episodes):
         print(f"[{label}] Starting episode {ep_idx + 1}/{n_episodes}...", flush=True)
@@ -201,6 +228,9 @@ def evaluate_head_to_head(
         if goal_scored:
             goals += 1
 
+        ep_returns.append(ep_return)
+        ep_steps.append(step_count)
+
         print(
             f"[{label}] Episode {ep_idx + 1:03d}: "
             f"return={ep_return:.1f}, steps={step_count}, "
@@ -221,6 +251,137 @@ def evaluate_head_to_head(
     print(f"  Avg return:        {total_return / n_episodes:.1f}")
     print(f"  Avg ep length:     {total_steps / n_episodes:.1f} steps\n")
 
+    stats = {
+        "label": label,
+        "returns": ep_returns,
+        "steps": ep_steps,
+        "wins": wins,
+        "losses": losses,
+        "goals": goals,
+    }
+    return stats
+
+
+def _summarize_eval_dict(d):
+    """Compute basic summary stats from an eval stats dict."""
+    returns = np.array(d["returns"], dtype=np.float32)
+    steps = np.array(d["steps"], dtype=np.float32)
+
+    wins = float(d.get("wins", 0))
+    losses = float(d.get("losses", 0))
+    goals = float(d.get("goals", 0))
+    n = max(len(returns), 1)
+
+    summary = {
+        "label": d["label"],
+        "episodes": len(returns),
+        "mean_return": float(returns.mean()) if len(returns) else 0.0,
+        "std_return": float(returns.std()) if len(returns) else 0.0,
+        "mean_steps": float(steps.mean()) if len(steps) else 0.0,
+        "win_rate": wins / n,
+        "loss_rate": losses / n,
+        "goal_rate": goals / n,
+    }
+    return summary
+
+
+def save_eval_summary_and_plots(
+    sac_vs_passive,
+    tqc_vs_passive,
+    sac_vs_tqc,
+    out_dir: str = "foosball_plots",
+):
+    """
+    Given raw stats from:
+      - SAC vs passive
+      - TQC vs passive
+      - SAC (yellow) vs TQC (black)
+
+    Save:
+      - eval_summary.csv with basic stats
+      - a few PNG plots comparing SAC and TQC
+    """
+
+    os.makedirs(out_dir, exist_ok=True)
+
+    sac_passive_summary = _summarize_eval_dict(sac_vs_passive)
+    tqc_passive_summary = _summarize_eval_dict(tqc_vs_passive)
+    sac_tqc_summary = _summarize_eval_dict(sac_vs_tqc)
+
+    # ---------------- CSV LOG ----------------
+    csv_path = os.path.join(out_dir, "eval_summary.csv")
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "label",
+                "episodes",
+                "mean_return",
+                "std_return",
+                "mean_steps",
+                "win_rate",
+                "loss_rate",
+                "goal_rate",
+            ],
+        )
+        writer.writeheader()
+        for row in [sac_passive_summary, tqc_passive_summary, sac_tqc_summary]:
+            writer.writerow(row)
+
+    print(f"[EVAL] Saved evaluation summary CSV to {csv_path}")
+
+    # ---------------- PLOT 1: mean return vs passive ----------------
+    x = np.arange(2)
+    width = 0.6
+    sac_val = sac_passive_summary["mean_return"]
+    tqc_val = tqc_passive_summary["mean_return"]
+
+    plt.figure()
+    plt.bar(
+        x,
+        [sac_val, tqc_val],
+        width=width,
+        tick_label=["SAC (yellow)", "TQC (black)"],
+        color=["gold", "black"],     # << yellow = SAC, black = TQC
+    )
+    plt.ylabel("Mean return vs passive")
+    plt.title("Foosball: mean return vs passive opponent")
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "mean_return_vs_passive.png"))
+    plt.close()
+
+    # ---------------- PLOT 2: win rate in head-to-head ----------------
+    plt.figure()
+    plt.bar(
+        ["SAC (yellow) vs TQC (black)"],
+        [sac_tqc_summary["win_rate"]],
+        color=["gold"],
+    )
+    plt.ylim(0, 1.0)
+    plt.ylabel("Win rate (SAC as yellow)")
+    plt.title("Head-to-head win rate")
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "head_to_head_win_rate.png"))
+    plt.close()
+
+    # ---------------- PLOT 3: head-to-head return distribution ----------------
+    plt.figure()
+    plt.hist(
+        sac_vs_tqc["returns"],
+        bins=20,
+        alpha=0.7,
+        color="gold",
+        label="SAC (yellow) returns",
+    )
+    plt.xlabel("Episode return")
+    plt.ylabel("Count")
+    plt.title("Head-to-head episode return distribution")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(os.path.join(out_dir, "head_to_head_returns_hist.png"))
+    plt.close()
+
+    print(f"[EVAL] Saved evaluation plots to {out_dir}")
 
 # ---------------------------------------------------------------------
 # Main entry
@@ -234,37 +395,48 @@ if __name__ == "__main__":
     tqc_model = TQC.load("foosball_tqc_nenv8_model.zip", device=device)
 
     try:
-        # # 1) Each vs passive black (no antagonist model)
-        # evaluate_model_vs_passive(
-        #     sac_model,
-        #     "SAC vs passive black",
-        #     n_episodes=50,
-        #     render=True,
-        # )
-        # evaluate_model_vs_passive(
-        #     tqc_model,
-        #     "TQC vs passive black",
-        #     n_episodes=50,
-        #     render=True,
-        # )
-
-        # 2) Head-to-head: SAC (yellow) vs TQC (black)
-        evaluate_head_to_head(
-            protagonist_model=sac_model,
-            antagonist_model=tqc_model,
-            label="SAC (yellow) vs TQC (black)",
+        # ---------- 1) Each vs passive black (metrics only, no render) ----------
+        sac_vs_passive = evaluate_model_vs_passive(
+            sac_model,
+            "SAC (yellow) vs passive black",
             n_episodes=50,
-            render=True,      # flip to True if you want to watch a few
+            render=False,
+        )
+        tqc_vs_passive = evaluate_model_vs_passive(
+            tqc_model,
+            "TQC (black) vs passive black",
+            n_episodes=50,
+            render=False,
         )
 
-        # # 3) Head-to-head: TQC (yellow) vs SAC (black)
+        # ---------- 2) Head-to-head: SAC (yellow) vs TQC (black) ----------
+        sac_vs_tqc = evaluate_head_to_head(
+            protagonist_model=sac_model,   # yellow
+            antagonist_model=tqc_model,    # black
+            label="SAC (yellow) vs TQC (black)",
+            n_episodes=50,
+            render=False,                  # set True if you want to *watch*, but slower
+        )
+
+        # ---------- 3) Save CSV + PNG plots ----------
+        save_eval_summary_and_plots(
+            sac_vs_passive,
+            tqc_vs_passive,
+            sac_vs_tqc,
+            out_dir="foosball_plots",
+        )
+
+        print("[EVAL] Done. Check 'foosball_plots/' for PNGs and CSV.")
+
+        # OPTIONAL: run a tiny visual demo just to watch:
         # evaluate_head_to_head(
-        #     protagonist_model=tqc_model,
-        #     antagonist_model=sac_model,
-        #     label="TQC (yellow) vs SAC (black)",
-        #     n_episodes=50,
+        #     protagonist_model=sac_model,
+        #     antagonist_model=tqc_model,
+        #     label="SAC (yellow) vs TQC (black) [visual demo]",
+        #     n_episodes=5,
         #     render=True,
         # )
 
     except KeyboardInterrupt:
         print("\n[INTERRUPTED] Evaluation stopped by user.", flush=True)
+

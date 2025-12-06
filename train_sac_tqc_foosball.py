@@ -29,7 +29,6 @@ from sb3_contrib import TQC
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 from stable_baselines3.common.callbacks import BaseCallback
-
 from ai_agents.v2.gym.full_information_protagonist_antagonist_gym import FoosballEnv
 
 
@@ -79,7 +78,7 @@ def make_env(seed: int = 0, antagonist_model=None):
             antagonist_model=antagonist_model,
             render_mode=None,       # no viewer during training
             verbose_mode=False,     # IMPORTANT: keep False for speed
-            play_until_goal=True,   # let env termination logic handle goals / timeouts
+            play_until_goal=False,   # let env termination logic handle goals / timeouts
         )
         env = Monitor(env)
         env.reset(seed=seed)
@@ -92,20 +91,30 @@ def make_env(seed: int = 0, antagonist_model=None):
 # Callback to collect per-episode stats
 # =========================================================
 
+
+
 class EpisodeStatsCallback(BaseCallback):
     """
-    Collect:
-      - episode return
-      - episode length
-      - goal_scored flag from env info
-    and keep them in lists so we can plot later.
+    Collect per-episode stats AND log them to TensorBoard.
+
+    Logs (per episode):
+      - <prefix>/ep_return
+      - <prefix>/ep_length
+      - <prefix>/ep_goal
+
+    Plus moving means over the last K episodes:
+      - <prefix>/ep_return_mean_K
+      - <prefix>/ep_length_mean_K
+      - <prefix>/ep_goal_rate_K
     """
 
-    def __init__(self, verbose: int = 1):
+    def __init__(self, verbose: int = 1, tensorboard_prefix: str = "episode"):
         super().__init__(verbose)
         self.episode_returns = []
         self.episode_lengths = []
         self.episode_goals = []
+        self.prefix = tensorboard_prefix
+        self._n_episodes = 0
 
     def _on_step(self) -> bool:
         dones = self.locals.get("dones")
@@ -115,16 +124,51 @@ class EpisodeStatsCallback(BaseCallback):
             return True
 
         for done, info in zip(dones, infos):
-            if done:
-                ep_info = info.get("episode")
-                if ep_info is not None:
-                    self.episode_returns.append(float(ep_info["r"]))
-                    self.episode_lengths.append(int(ep_info["l"]))
-                    self.episode_goals.append(
-                        float(info.get("goal_scored", False))
-                    )
+            if not done:
+                continue
+
+            ep_info = info.get("episode")
+            if ep_info is None:
+                continue
+
+            r = float(ep_info["r"])
+            l = int(ep_info["l"])
+            g = float(info.get("goal_scored", False))
+
+            self.episode_returns.append(r)
+            self.episode_lengths.append(l)
+            self.episode_goals.append(g)
+            self._n_episodes += 1
+
+            # --- log raw episode stats ---
+            self.logger.record(f"{self.prefix}/ep_return", r)
+            self.logger.record(f"{self.prefix}/ep_length", l)
+            self.logger.record(f"{self.prefix}/ep_goal", g)
+
+            # --- log moving averages over last K episodes ---
+            K = 50
+            recent_returns = self.episode_returns[-K:]
+            recent_lengths = self.episode_lengths[-K:]
+            recent_goals   = self.episode_goals[-K:]
+
+            self.logger.record(
+                f"{self.prefix}/ep_return_mean_{K}",
+                float(np.mean(recent_returns)),
+            )
+            self.logger.record(
+                f"{self.prefix}/ep_length_mean_{K}",
+                float(np.mean(recent_lengths)),
+            )
+            self.logger.record(
+                f"{self.prefix}/ep_goal_rate_{K}",
+                float(np.mean(recent_goals)),
+            )
+
+            if self.verbose and (self._n_episodes % 50 == 0):
+                print(f"[CB] Logged {self._n_episodes} episodes to TensorBoard")
 
         return True
+
 
 
 # =========================================================
@@ -247,7 +291,10 @@ def train(
     else:
         raise ValueError("algo must be 'sac' or 'tqc'")
 
-    callback = EpisodeStatsCallback(verbose=1)
+    callback = EpisodeStatsCallback(
+        verbose=1,
+        tensorboard_prefix=f"{algo_name}/episode",
+    )
 
     log_dir = os.path.join("tb_logs", f"foosball_{algo_name.lower()}_nenv{n_envs}")
     os.makedirs(log_dir, exist_ok=True)
@@ -263,21 +310,25 @@ def train(
         vec_env,
         verbose=1,
         device=device,
-        tensorboard_log=log_dir,
+        tensorboard_log=log_dir,   # only the log directory here
         learning_rate=3e-4,
-        buffer_size=200_000,
-        batch_size=1024,
+        buffer_size=500_000,
+        batch_size=256,
         gamma=0.99,
-        tau=0.01,
-        train_freq=1,          # 1 step per env => n_envs transitions per update
-        gradient_steps=4,      # multiple gradient updates per collection
+        tau=0.02,
+        train_freq=16,
+        gradient_steps=32,
     )
+
+
 
     model.learn(
         total_timesteps=total_timesteps,
         callback=callback,
         progress_bar=True,
+        tb_log_name=f"{algo_name}_nenv{n_envs}",  # <- this is where it belongs
     )
+
 
     save_path = f"foosball_{algo_name.lower()}_nenv{n_envs}_model"
     model.save(save_path)
@@ -289,12 +340,12 @@ def train(
 
 if __name__ == "__main__":
     # ------------------- PHASE 1: Train SAC vs passive-lifted black -------------------
-    TRAIN_SAC = False  # set to True if you want to retrain SAC
+    TRAIN_SAC = True  # set to True if you want to retrain SAC
 
     if TRAIN_SAC:
         sac_model, sac_cb = train(
             algo="sac",
-            total_timesteps=200_000,
+            total_timesteps=800_000,
             seed=0,
             n_envs=8,
             antagonist_model=None,
@@ -308,7 +359,7 @@ if __name__ == "__main__":
     # ------------------- PHASE 2: Train TQC vs frozen SAC antagonist ------------------
     tqc_model, tqc_cb = train(
         algo="tqc",
-        total_timesteps=200_000,
+        total_timesteps=800_000,
         seed=1,
         n_envs=8,
         antagonist_model=sac_model,
