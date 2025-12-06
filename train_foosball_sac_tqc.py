@@ -228,7 +228,7 @@ def train(
         tensorboard_log=os.path.join("tb_logs", "foosball_" + algo_name.lower()),
         learning_rate=3e-4,
         buffer_size=100_000,
-        batch_size=256,
+        batch_size=512,
         gamma=0.99,
         tau=0.01,
         train_freq=1,
